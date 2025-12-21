@@ -57,28 +57,22 @@ class _SubChatScreenState extends State<SubChatScreen> {
   }
 
   Future<void> _initializeChat() async {
-    // 发送初始系统消息（包含请求说明书和文件）
     await _sendFilesWithMessage(widget.initialMessage, widget.requestedPaths);
   }
 
   Future<void> _sendFilesWithMessage(String message, List<String> paths) async {
-    // 获取文件内容
     final fileContents = await FileService.instance.getFilesContent(paths);
     final totalSize = fileContents.fold<int>(0, (sum, f) => sum + f.size);
 
-    // 构建消息内容
     String content = '【请求说明书】\n$message\n\n【文件目录】\n${widget.directoryTree}';
 
-    // 检查是否需要分批发送
     if (totalSize <= AppConfig.maxChunkSize) {
-      // 一次性发送
       content += '\n\n【文件内容】\n';
       for (var file in fileContents) {
         content += '--- ${file.path} ---\n${file.content}\n\n';
       }
       await _sendSystemMessage(content);
     } else {
-      // 分批发送
       await _sendFilesInChunks(content, fileContents);
     }
   }
@@ -91,11 +85,9 @@ class _SubChatScreenState extends State<SubChatScreen> {
 
     for (var file in files) {
       if (file.size > AppConfig.maxChunkSize) {
-        // 单个文件过大，需要分割
         await _sendLargeFile(baseContent, file, sentSize, totalSize);
         sentSize += file.size;
       } else if (currentBatchSize + file.size > AppConfig.maxChunkSize) {
-        // 当前批次已满，发送
         await _sendBatch(baseContent, currentBatch, sentSize, totalSize);
         sentSize += currentBatchSize;
         currentBatch = [file];
@@ -106,7 +98,6 @@ class _SubChatScreenState extends State<SubChatScreen> {
       }
     }
 
-    // 发送剩余的文件
     if (currentBatch.isNotEmpty) {
       await _sendBatch(baseContent, currentBatch, sentSize, totalSize);
     }
@@ -130,7 +121,6 @@ class _SubChatScreenState extends State<SubChatScreen> {
 
     await _sendSystemMessage(content);
 
-    // 等待AI回复【请继续】
     if (percentage < 100) {
       await _waitForContinue();
     }
@@ -147,7 +137,6 @@ class _SubChatScreenState extends State<SubChatScreen> {
 
     for (var chunk in chunks) {
       chunksSent++;
-      int filePercentage = ((chunksSent / chunks.length) * 100).round();
       int overallPercentage = (((sentSize + (file.size * chunksSent / chunks.length)) / totalSize) * 100).round();
 
       String content = '$baseContent\n\n【文件内容 - ${file.path} (第$chunksSent/${chunks.length}部分)】\n$chunk';
@@ -162,7 +151,6 @@ class _SubChatScreenState extends State<SubChatScreen> {
   }
 
   Future<void> _waitForContinue() async {
-    // 等待AI回复并检测【请继续】
     while (true) {
       await Future.delayed(const Duration(milliseconds: 500));
       final lastMessage = _session.lastAssistantMessage;
@@ -170,7 +158,6 @@ class _SubChatScreenState extends State<SubChatScreen> {
         break;
       }
       if (lastMessage != null && lastMessage.status == MessageStatus.sent) {
-        // AI回复了但没有【请继续】，用户可能需要手动干预
         break;
       }
     }
@@ -185,7 +172,6 @@ class _SubChatScreenState extends State<SubChatScreen> {
     _session.addMessage(systemMessage);
     _scrollToBottom();
 
-    // 添加AI回复占位
     final aiMessage = Message(
       role: MessageRole.assistant,
       content: '',
@@ -195,17 +181,30 @@ class _SubChatScreenState extends State<SubChatScreen> {
     _session.setLoading(true);
     _scrollToBottom();
 
+    final stopwatch = Stopwatch()..start();
+
     try {
       final response = await ApiService.sendToSubAI(
         messages: _session.messages.where((m) => m.status != MessageStatus.sending).toList(),
         directoryTree: widget.directoryTree,
       );
 
-      _session.updateMessage(aiMessage.id, content: response, status: MessageStatus.sent);
+      stopwatch.stop();
+
+      _session.updateMessage(
+        aiMessage.id,
+        content: response.content,
+        status: MessageStatus.sent,
+        tokenUsage: TokenUsage(
+          promptTokens: response.promptTokens,
+          completionTokens: response.completionTokens,
+          totalTokens: response.totalTokens,
+          duration: stopwatch.elapsedMilliseconds / 1000,
+        ),
+      );
       _scrollToBottom();
 
-      // 检测返回主界面或继续请求文件
-      await _handleAIResponse(response);
+      await _handleAIResponse(response.content);
 
     } catch (e) {
       _session.updateMessage(aiMessage.id, content: '发送失败: $e', status: MessageStatus.error);
@@ -215,16 +214,13 @@ class _SubChatScreenState extends State<SubChatScreen> {
   }
 
   Future<void> _handleAIResponse(String response) async {
-    // 检测是否返回主界面
     if (_detector.hasReturnToMain(response)) {
-      // 返回主界面并传递消息
       if (mounted) {
         Navigator.pop(context, response);
       }
       return;
     }
 
-    // 检测是否继续请求文件
     if (_detector.hasRequestDoc(response)) {
       final paths = _detector.extractPaths(response);
       if (paths.isNotEmpty) {
@@ -254,16 +250,30 @@ class _SubChatScreenState extends State<SubChatScreen> {
     _session.setLoading(true);
     _scrollToBottom();
 
+    final stopwatch = Stopwatch()..start();
+
     try {
       final response = await ApiService.sendToSubAI(
         messages: _session.messages.where((m) => m.status != MessageStatus.sending).toList(),
         directoryTree: widget.directoryTree,
       );
 
-      _session.updateMessage(aiMessage.id, content: response, status: MessageStatus.sent);
+      stopwatch.stop();
+
+      _session.updateMessage(
+        aiMessage.id,
+        content: response.content,
+        status: MessageStatus.sent,
+        tokenUsage: TokenUsage(
+          promptTokens: response.promptTokens,
+          completionTokens: response.completionTokens,
+          totalTokens: response.totalTokens,
+          duration: stopwatch.elapsedMilliseconds / 1000,
+        ),
+      );
       _scrollToBottom();
 
-      await _handleAIResponse(response);
+      await _handleAIResponse(response.content);
 
     } catch (e) {
       _session.updateMessage(aiMessage.id, content: '发送失败: $e', status: MessageStatus.error);
