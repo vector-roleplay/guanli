@@ -1,7 +1,6 @@
 // lib/screens/main_chat_screen.dart
 
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
 import '../models/message.dart';
 import '../models/chat_session.dart';
 import '../services/api_service.dart';
@@ -56,7 +55,6 @@ class _MainChatScreenState extends State<MainChatScreen> {
   Future<void> _sendMessage(String text, List<FileAttachment> attachments) async {
     if (text.isEmpty && attachments.isEmpty) return;
 
-    // 添加用户消息
     final userMessage = Message(
       role: MessageRole.user,
       content: text,
@@ -66,7 +64,6 @@ class _MainChatScreenState extends State<MainChatScreen> {
     _session.addMessage(userMessage);
     _scrollToBottom();
 
-    // 添加一个占位的AI消息
     final aiMessage = Message(
       role: MessageRole.assistant,
       content: '',
@@ -76,19 +73,30 @@ class _MainChatScreenState extends State<MainChatScreen> {
     _session.setLoading(true);
     _scrollToBottom();
 
+    final stopwatch = Stopwatch()..start();
+
     try {
-      // 调用API
       final response = await ApiService.sendToMainAI(
         messages: _session.messages.where((m) => m.status != MessageStatus.sending).toList(),
         directoryTree: _directoryTree,
       );
 
-      // 更新AI消息
-      _session.updateMessage(aiMessage.id, content: response, status: MessageStatus.sent);
+      stopwatch.stop();
+
+      _session.updateMessage(
+        aiMessage.id,
+        content: response.content,
+        status: MessageStatus.sent,
+        tokenUsage: TokenUsage(
+          promptTokens: response.promptTokens,
+          completionTokens: response.completionTokens,
+          totalTokens: response.totalTokens,
+          duration: stopwatch.elapsedMilliseconds / 1000,
+        ),
+      );
       _scrollToBottom();
 
-      // 检测是否需要跳转子界面
-      await _checkAndNavigateToSub(response);
+      await _checkAndNavigateToSub(response.content);
 
     } catch (e) {
       _session.updateMessage(aiMessage.id, content: '发送失败: $e', status: MessageStatus.error);
@@ -104,7 +112,6 @@ class _MainChatScreenState extends State<MainChatScreen> {
       final paths = detector.extractPaths(response);
       
       if (paths.isNotEmpty) {
-        // 跳转到子界面
         final result = await Navigator.push<String>(
           context,
           MaterialPageRoute(
@@ -116,7 +123,6 @@ class _MainChatScreenState extends State<MainChatScreen> {
           ),
         );
 
-        // 如果子界面返回了消息，发送给主界面AI
         if (result != null && result.isNotEmpty) {
           await _sendMessage(result, []);
         }
@@ -166,7 +172,7 @@ class _MainChatScreenState extends State<MainChatScreen> {
                 context,
                 MaterialPageRoute(builder: (context) => const SettingsScreen()),
               );
-              _loadDirectoryTree(); // 刷新目录树
+              _loadDirectoryTree();
             },
             icon: const Icon(Icons.settings),
             tooltip: '设置',
@@ -175,7 +181,6 @@ class _MainChatScreenState extends State<MainChatScreen> {
       ),
       body: Column(
         children: [
-          // 消息列表
           Expanded(
             child: ListenableBuilder(
               listenable: _session,
@@ -220,7 +225,6 @@ class _MainChatScreenState extends State<MainChatScreen> {
               },
             ),
           ),
-          // 输入框
           ListenableBuilder(
             listenable: _session,
             builder: (context, _) {
