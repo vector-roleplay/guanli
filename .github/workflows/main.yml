@@ -44,6 +44,14 @@ jobs:
           
           rm -rf temp_project
 
+      - name: Fix Kotlin version
+        run: |
+          # 更新 settings.gradle 中的 Kotlin 版本
+          sed -i 's/id "org.jetbrains.kotlin.android" version "[^"]*"/id "org.jetbrains.kotlin.android" version "1.9.22"/' android/settings.gradle
+          
+          # 如果是 settings.gradle.kts 格式
+          sed -i 's/id("org.jetbrains.kotlin.android") version "[^"]*"/id("org.jetbrains.kotlin.android") version "1.9.22"/' android/settings.gradle.kts || true
+
       - name: Configure Android
         run: |
           sed -i 's/minSdkVersion .*/minSdkVersion 21/' android/app/build.gradle || true
