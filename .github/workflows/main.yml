@@ -1,0 +1,63 @@
+name: Build APK
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.24.0'
+          channel: 'stable'
+
+      - name: Create Flutter project structure
+        run: |
+          mkdir -p /tmp/my_code
+          cp -r lib /tmp/my_code/ || true
+          cp -r Lib /tmp/my_code/lib || true
+          cp pubspec.yaml /tmp/my_code/
+          
+          flutter create --org com.aichat --project-name ai_chat_app temp_project
+          
+          cp -r temp_project/android ./
+          cp -r temp_project/ios ./
+          cp temp_project/analysis_options.yaml ./
+          
+          rm -rf lib Lib
+          cp -r /tmp/my_code/lib ./
+          cp /tmp/my_code/pubspec.yaml ./
+          
+          rm -rf temp_project
+
+      - name: Configure Android
+        run: |
+          sed -i 's/minSdkVersion .*/minSdkVersion 21/' android/app/build.gradle || true
+          sed -i 's/minSdk = .*/minSdk = 21/' android/app/build.gradle || true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Build APK
+        run: flutter build apk --release
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-chat-app
+          path: build/app/outputs/flutter-apk/app-release.apk
+          retention-days: 30
