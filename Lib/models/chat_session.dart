@@ -17,21 +17,18 @@ class ChatSession extends ChangeNotifier {
     notifyListeners();
   }
 
-  void updateMessage(String id, {String? content, MessageStatus? status}) {
+  void updateMessage(String id, {String? content, MessageStatus? status, TokenUsage? tokenUsage}) {
     final index = _messages.indexWhere((m) => m.id == id);
     if (index != -1) {
-      if (content != null) {
-        _messages[index] = Message(
-          id: _messages[index].id,
-          role: _messages[index].role,
-          content: content,
-          timestamp: _messages[index].timestamp,
-          attachments: _messages[index].attachments,
-          status: status ?? _messages[index].status,
-        );
-      } else if (status != null) {
-        _messages[index].status = status;
-      }
+      _messages[index] = Message(
+        id: _messages[index].id,
+        role: _messages[index].role,
+        content: content ?? _messages[index].content,
+        timestamp: _messages[index].timestamp,
+        attachments: _messages[index].attachments,
+        status: status ?? _messages[index].status,
+        tokenUsage: tokenUsage ?? _messages[index].tokenUsage,
+      );
       notifyListeners();
     }
   }
@@ -52,7 +49,6 @@ class ChatSession extends ChangeNotifier {
     notifyListeners();
   }
 
-  // 获取最后一条AI消息
   Message? get lastAssistantMessage {
     for (int i = _messages.length - 1; i >= 0; i--) {
       if (_messages[i].role == MessageRole.assistant) {
