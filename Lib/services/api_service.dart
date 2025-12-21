@@ -5,9 +5,47 @@ import 'package:http/http.dart' as http;
 import '../models/message.dart';
 import '../config/app_config.dart';
 
+class ApiResponse {
+  final String content;
+  final int promptTokens;
+  final int completionTokens;
+  final int totalTokens;
+
+  ApiResponse({
+    required this.content,
+    required this.promptTokens,
+    required this.completionTokens,
+    required this.totalTokens,
+  });
+}
+
 class ApiService {
+  // 获取模型列表
+  static Future<List<String>> getModels(String apiUrl, String apiKey) async {
+    try {
+      final url = Uri.parse('$apiUrl/models');
+      
+      final response = await http.get(
+        url,
+        headers: {
+          'Authorization': 'Bearer $apiKey',
+        },
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(utf8.decode(response.bodyBytes));
+        final models = data['data'] as List;
+        return models.map((m) => m['id'].toString()).toList();
+      } else {
+        throw Exception('获取模型失败: ${response.statusCode}');
+      }
+    } catch (e) {
+      throw Exception('获取模型失败: $e');
+    }
+  }
+
   // 发送消息到主界面AI
-  static Future<String> sendToMainAI({
+  static Future<ApiResponse> sendToMainAI({
     required List<Message> messages,
     required String directoryTree,
   }) async {
@@ -23,7 +61,7 @@ class ApiService {
   }
 
   // 发送消息到子界面AI
-  static Future<String> sendToSubAI({
+  static Future<ApiResponse> sendToSubAI({
     required List<Message> messages,
     required String directoryTree,
   }) async {
@@ -38,7 +76,7 @@ class ApiService {
     );
   }
 
-  static Future<String> _sendRequest({
+  static Future<ApiResponse> _sendRequest({
     required String apiUrl,
     required String apiKey,
     required String model,
@@ -48,10 +86,8 @@ class ApiService {
   }) async {
     final url = Uri.parse('$apiUrl/chat/completions');
 
-    // 构建消息列表
     List<Map<String, dynamic>> apiMessages = [];
 
-    // 添加系统消息（如果有）
     if (systemPrompt.isNotEmpty || directoryTree.isNotEmpty) {
       String systemContent = '';
       if (directoryTree.isNotEmpty) {
@@ -66,18 +102,8 @@ class ApiService {
       });
     }
 
-    // 添加对话消息
     for (var msg in messages) {
       apiMessages.add(msg.toApiFormat());
-    }
-
-    // 处理最后一条用户消息，附加提示词
-    if (apiMessages.isNotEmpty && 
-        apiMessages.last['role'] == 'user' && 
-        systemPrompt.isNotEmpty) {
-      // 提示词已在system消息中，这里不重复添加
-      // 如果需要在用户消息尾部也加，可以取消下面的注释
-      // apiMessages.last['content'] += '\n\n$systemPrompt';
     }
 
     final response = await http.post(
@@ -95,7 +121,15 @@ class ApiService {
 
     if (response.statusCode == 200) {
       final data = jsonDecode(utf8.decode(response.bodyBytes));
-      return data['choices'][0]['message']['content'];
+      final content = data['choices'][0]['message']['content'];
+      final usage = data['usage'] ?? {};
+      
+      return ApiResponse(
+        content: content,
+        promptTokens: usage['prompt_tokens'] ?? 0,
+        completionTokens: usage['completion_tokens'] ?? 0,
+        totalTokens: usage['total_tokens'] ?? 0,
+      );
     } else {
       throw Exception('API请求失败: ${response.statusCode} - ${response.body}');
     }
