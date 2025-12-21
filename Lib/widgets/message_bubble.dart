@@ -36,7 +36,6 @@ class MessageBubble extends StatelessWidget {
           crossAxisAlignment:
               isUser ? CrossAxisAlignment.end : CrossAxisAlignment.start,
           children: [
-            // 角色标签
             Padding(
               padding: const EdgeInsets.only(bottom: 4, left: 4, right: 4),
               child: Text(
@@ -47,7 +46,6 @@ class MessageBubble extends StatelessWidget {
                 ),
               ),
             ),
-            // 消息内容
             GestureDetector(
               onLongPress: () => _showOptions(context),
               child: Container(
@@ -55,18 +53,16 @@ class MessageBubble extends StatelessWidget {
                 decoration: BoxDecoration(
                   color: isUser
                       ? colorScheme.primaryContainer
-                      : colorScheme.surfaceVariant,
+                      : colorScheme.surfaceContainerHighest,
                   borderRadius: BorderRadius.circular(16),
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // 附件列表
                     if (message.attachments.isNotEmpty) ...[
                       _buildAttachments(context),
                       const SizedBox(height: 8),
                     ],
-                    // 消息文本（支持Markdown）
                     if (message.content.isNotEmpty)
                       MarkdownBody(
                         data: message.content,
@@ -79,7 +75,6 @@ class MessageBubble extends StatelessWidget {
                           ),
                         ),
                       ),
-                    // 发送状态
                     if (message.status == MessageStatus.sending)
                       Padding(
                         padding: const EdgeInsets.only(top: 8),
@@ -92,7 +87,6 @@ class MessageBubble extends StatelessWidget {
                           ),
                         ),
                       ),
-                    // 错误状态
                     if (message.status == MessageStatus.error)
                       Padding(
                         padding: const EdgeInsets.only(top: 8),
@@ -133,21 +127,76 @@ class MessageBubble extends StatelessWidget {
                 ),
               ),
             ),
-            // 时间戳
+            // Token统计 + 时间
             Padding(
               padding: const EdgeInsets.only(top: 4, left: 4, right: 4),
-              child: Text(
-                _formatTime(message.timestamp),
-                style: TextStyle(
-                  fontSize: 10,
-                  color: colorScheme.outline.withOpacity(0.6),
-                ),
-              ),
+              child: _buildFooter(context),
             ),
           ],
         ),
       ),
     );
+  }
+
+  Widget _buildFooter(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final usage = message.tokenUsage;
+    
+    return Wrap(
+      spacing: 12,
+      children: [
+        // Token统计（仅AI消息显示）
+        if (message.role == MessageRole.assistant && usage != null) ...[
+          _buildTokenChip(
+            context,
+            '↑ ${_formatNumber(usage.promptTokens)} tokens',
+            colorScheme.outline.withOpacity(0.7),
+          ),
+          _buildTokenChip(
+            context,
+            '↓ ${_formatNumber(usage.completionTokens)} tokens',
+            colorScheme.outline.withOpacity(0.7),
+          ),
+          if (usage.tokensPerSecond > 0)
+            _buildTokenChip(
+              context,
+              '⚡${usage.tokensPerSecond.toStringAsFixed(1)} tok/s',
+              colorScheme.outline.withOpacity(0.7),
+            ),
+          if (usage.duration > 0)
+            _buildTokenChip(
+              context,
+              '⏱${usage.duration.toStringAsFixed(1)}s',
+              colorScheme.outline.withOpacity(0.7),
+            ),
+        ],
+        // 时间戳
+        Text(
+          _formatTime(message.timestamp),
+          style: TextStyle(
+            fontSize: 10,
+            color: colorScheme.outline.withOpacity(0.6),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildTokenChip(BuildContext context, String text, Color color) {
+    return Text(
+      text,
+      style: TextStyle(
+        fontSize: 10,
+        color: color,
+      ),
+    );
+  }
+
+  String _formatNumber(int num) {
+    if (num >= 1000) {
+      return '${(num / 1000).toStringAsFixed(1)}K';
+    }
+    return num.toString();
   }
 
   Widget _buildAttachments(BuildContext context) {
