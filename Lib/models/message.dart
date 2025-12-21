@@ -1,3 +1,4 @@
+
 // lib/models/message.dart
 
 import 'package:uuid/uuid.dart';
@@ -6,6 +7,39 @@ enum MessageRole { user, assistant, system }
 
 enum MessageStatus { sending, sent, error }
 
+class TokenUsage {
+  final int promptTokens;
+  final int completionTokens;
+  final int totalTokens;
+  final double duration; // 秒
+  
+  TokenUsage({
+    this.promptTokens = 0,
+    this.completionTokens = 0,
+    this.totalTokens = 0,
+    this.duration = 0,
+  });
+
+  double get tokensPerSecond {
+    if (duration <= 0) return 0;
+    return completionTokens / duration;
+  }
+
+  Map<String, dynamic> toJson() => {
+    'promptTokens': promptTokens,
+    'completionTokens': completionTokens,
+    'totalTokens': totalTokens,
+    'duration': duration,
+  };
+
+  factory TokenUsage.fromJson(Map<String, dynamic> json) => TokenUsage(
+    promptTokens: json['promptTokens'] ?? 0,
+    completionTokens: json['completionTokens'] ?? 0,
+    totalTokens: json['totalTokens'] ?? 0,
+    duration: json['duration'] ?? 0,
+  );
+}
+
 class Message {
   final String id;
   final MessageRole role;
@@ -13,6 +47,7 @@ class Message {
   final DateTime timestamp;
   final List<FileAttachment> attachments;
   MessageStatus status;
+  TokenUsage? tokenUsage;
 
   Message({
     String? id,
@@ -21,6 +56,7 @@ class Message {
     DateTime? timestamp,
     List<FileAttachment>? attachments,
     this.status = MessageStatus.sent,
+    this.tokenUsage,
   })  : id = id ?? const Uuid().v4(),
         timestamp = timestamp ?? DateTime.now(),
         attachments = attachments ?? [];
@@ -33,6 +69,7 @@ class Message {
       'timestamp': timestamp.toIso8601String(),
       'attachments': attachments.map((a) => a.toJson()).toList(),
       'status': status.name,
+      'tokenUsage': tokenUsage?.toJson(),
     };
   }
 
@@ -46,10 +83,12 @@ class Message {
           ?.map((a) => FileAttachment.fromJson(a))
           .toList(),
       status: MessageStatus.values.byName(json['status'] ?? 'sent'),
+      tokenUsage: json['tokenUsage'] != null 
+          ? TokenUsage.fromJson(json['tokenUsage']) 
+          : null,
     );
   }
 
-  // 转换为API请求格式
   Map<String, dynamic> toApiFormat() {
     return {
       'role': role.name,
@@ -64,7 +103,7 @@ class FileAttachment {
   final String path;
   final String mimeType;
   final int size;
-  final String? content; // 文件内容（文本文件）
+  final String? content;
 
   FileAttachment({
     String? id,
