@@ -2,9 +2,9 @@
 
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
-import 'package:provider/provider.dart';
 import '../config/app_config.dart';
 import '../services/database_service.dart';
+import '../services/api_service.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -14,13 +14,11 @@ class SettingsScreen extends StatefulWidget {
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
-  // 主界面API控制器
   late TextEditingController _mainApiUrlController;
   late TextEditingController _mainApiKeyController;
   late TextEditingController _mainModelController;
   late TextEditingController _mainPromptController;
 
-  // 子界面API控制器
   late TextEditingController _subApiUrlController;
   late TextEditingController _subApiKeyController;
   late TextEditingController _subModelController;
@@ -28,6 +26,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   String _directoryTree = '';
   bool _isLoading = false;
+  
+  List<String> _mainModels = [];
+  List<String> _subModels = [];
+  bool _loadingMainModels = false;
+  bool _loadingSubModels = false;
 
   @override
   void initState() {
@@ -63,6 +66,120 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> _loadDirectoryTree() async {
     final tree = await DatabaseService.instance.getDirectoryTree();
     setState(() => _directoryTree = tree);
+  }
+
+  Future<void> _fetchMainModels() async {
+    final url = _mainApiUrlController.text.trim();
+    final key = _mainApiKeyController.text.trim();
+    
+    if (url.isEmpty || key.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('请先填写API地址和密钥')),
+      );
+      return;
+    }
+
+    setState(() => _loadingMainModels = true);
+
+    try {
+      final models = await ApiService.getModels(url, key);
+      setState(() {
+        _mainModels = models;
+        _loadingMainModels = false;
+      });
+      
+      if (models.isNotEmpty) {
+        _showModelPicker(models, _mainModelController);
+      }
+    } catch (e) {
+      setState(() => _loadingMainModels = false);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('获取模型失败: $e')),
+        );
+      }
+    }
+  }
+
+  Future<void> _fetchSubModels() async {
+    final url = _subApiUrlController.text.trim();
+    final key = _subApiKeyController.text.trim();
+    
+    if (url.isEmpty || key.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('请先填写API地址和密钥')),
+      );
+      return;
+    }
+
+    setState(() => _loadingSubModels = true);
+
+    try {
+      final models = await ApiService.getModels(url, key);
+      setState(() {
+        _subModels = models;
+        _loadingSubModels = false;
+      });
+      
+      if (models.isNotEmpty) {
+        _showModelPicker(models, _subModelController);
+      }
+    } catch (e) {
+      setState(() => _loadingSubModels = false);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('获取模型失败: $e')),
+        );
+      }
+    }
+  }
+
+  void _showModelPicker(List<String> models, TextEditingController controller) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      builder: (context) => DraggableScrollableSheet(
+        initialChildSize: 0.6,
+        minChildSize: 0.3,
+        maxChildSize: 0.9,
+        expand: false,
+        builder: (context, scrollController) => Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Text(
+                '选择模型 (${models.length}个)',
+                style: const TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+            Expanded(
+              child: ListView.builder(
+                controller: scrollController,
+                itemCount: models.length,
+                itemBuilder: (context, index) {
+                  final model = models[index];
+                  final isSelected = controller.text == model;
+                  return ListTile(
+                    title: Text(model),
+                    trailing: isSelected
+                        ? Icon(Icons.check, color: Theme.of(context).colorScheme.primary)
+                        : null,
+                    onTap: () {
+                      controller.text = model;
+                      Navigator.pop(context);
+                      setState(() {});
+                    },
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   void _saveSettings() {
@@ -191,7 +308,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // ============ 主界面API设置 ============
+                  // 主界面API设置
                   _buildSectionTitle('主界面 API 设置', Icons.api),
                   const SizedBox(height: 12),
                   _buildTextField(
@@ -207,10 +324,27 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     obscure: true,
                   ),
                   const SizedBox(height: 12),
-                  _buildTextField(
-                    controller: _mainModelController,
-                    label: '模型',
-                    hint: 'gpt-4',
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _buildTextField(
+                          controller: _mainModelController,
+                          label: '模型',
+                          hint: 'gpt-4',
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      ElevatedButton(
+                        onPressed: _loadingMainModels ? null : _fetchMainModels,
+                        child: _loadingMainModels
+                            ? const SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: CircularProgressIndicator(strokeWidth: 2),
+                              )
+                            : const Text('获取'),
+                      ),
+                    ],
                   ),
                   const SizedBox(height: 12),
                   _buildTextField(
@@ -222,7 +356,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
                   const SizedBox(height: 32),
 
-                  // ============ 子界面API设置 ============
+                  // 子界面API设置
                   _buildSectionTitle('子界面 API 设置', Icons.api),
                   const SizedBox(height: 12),
                   _buildTextField(
@@ -238,10 +372,27 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     obscure: true,
                   ),
                   const SizedBox(height: 12),
-                  _buildTextField(
-                    controller: _subModelController,
-                    label: '模型',
-                    hint: 'gpt-4',
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _buildTextField(
+                          controller: _subModelController,
+                          label: '模型',
+                          hint: 'gpt-4',
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      ElevatedButton(
+                        onPressed: _loadingSubModels ? null : _fetchSubModels,
+                        child: _loadingSubModels
+                            ? const SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: CircularProgressIndicator(strokeWidth: 2),
+                              )
+                            : const Text('获取'),
+                      ),
+                    ],
                   ),
                   const SizedBox(height: 12),
                   _buildTextField(
@@ -253,7 +404,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
                   const SizedBox(height: 32),
 
-                  // ============ 文件数据库 ============
+                  // 文件数据库
                   _buildSectionTitle('文件数据库', Icons.folder),
                   const SizedBox(height: 12),
 
@@ -290,12 +441,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
                   const SizedBox(height: 16),
 
-                  // 目录树预览
                   Container(
                     width: double.infinity,
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
-                      color: colorScheme.surfaceVariant.withOpacity(0.5),
+                      color: colorScheme.surfaceContainerHighest.withOpacity(0.5),
                       borderRadius: BorderRadius.circular(8),
                       border: Border.all(color: colorScheme.outline.withOpacity(0.3)),
                     ),
