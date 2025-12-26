@@ -47,7 +47,7 @@ class DatabaseService {
     return _database!;
   }
 
-  // 导入文件夹（包含所有文件内容）
+  // 导入文件夹
   Future<int> importDirectory(String dirPath) async {
     final dir = Directory(dirPath);
     if (!await dir.exists()) {
@@ -55,25 +55,21 @@ class DatabaseService {
     }
 
     int fileCount = 0;
-    await _importRecursive(dir, '', (count) => fileCount = count);
+    await _importRecursive(dir, '', (count) => fileCount += count);
     return fileCount;
   }
 
   Future<void> _importRecursive(Directory dir, String parentPath, Function(int) onCount) async {
-    int count = 0;
-    
     try {
       final entities = await dir.list(followLinks: false).toList();
 
       for (var entity in entities) {
         final name = entity.path.split('/').last;
-        // 跳过隐藏文件
         if (name.startsWith('.')) continue;
         
         final relativePath = parentPath.isEmpty ? name : '$parentPath/$name';
 
         if (entity is Directory) {
-          // 保存目录
           await db.insert(
             'files',
             {
@@ -87,26 +83,19 @@ class DatabaseService {
             conflictAlgorithm: ConflictAlgorithm.replace,
           );
 
-          // 递归处理子目录
           await _importRecursive(entity, relativePath, onCount);
         } else if (entity is File) {
-          // 读取文件内容
           String? content;
           int size = 0;
           
           try {
             size = await entity.length();
-          } catch (e) {
-            // 无法获取大小
-          }
+          } catch (e) {}
 
-          // 读取文件内容（限制5MB以内）
           if (size > 0 && size < 5 * 1024 * 1024) {
             try {
               content = await entity.readAsString();
-            } catch (e) {
-              // 二进制文件无法读取为文本
-            }
+            } catch (e) {}
           }
 
           await db.insert(
@@ -124,14 +113,12 @@ class DatabaseService {
             conflictAlgorithm: ConflictAlgorithm.replace,
           );
           
-          count++;
+          onCount(1);
         }
       }
     } catch (e) {
       print('遍历目录出错: $e');
     }
-    
-    onCount(count);
   }
 
   // 导入单个文件
@@ -144,17 +131,13 @@ class DatabaseService {
     
     try {
       size = await file.length();
-    } catch (e) {
-      // 无法获取大小
-    }
+    } catch (e) {}
 
     String? content;
     if (size > 0 && size < 5 * 1024 * 1024) {
       try {
         content = await file.readAsString();
-      } catch (e) {
-        // 非文本文件
-      }
+      } catch (e) {}
     }
 
     await db.insert(
@@ -173,9 +156,13 @@ class DatabaseService {
     );
   }
 
-  // 获取目录树
+  // 获取目录树（只查必要字段，不查content）
   Future<String> getDirectoryTree() async {
-    final files = await db.query('files', orderBy: 'path');
+    final files = await db.query(
+      'files',
+      columns: ['path', 'name', 'is_directory'],  // 只查这3个字段
+      orderBy: 'path',
+    );
 
     if (files.isEmpty) return '(暂无文件)';
 
@@ -186,7 +173,6 @@ class DatabaseService {
       final name = file['name'] as String;
       final isDir = file['is_directory'] == 1;
       
-      // 计算缩进层级
       final depth = path.split('/').length - 1;
       final prefix = '  ' * depth;
       final icon = isDir ? '📁' : '📄';
@@ -197,56 +183,61 @@ class DatabaseService {
     return tree.toString();
   }
 
-  // 根据路径获取文件内容
+  // 根据路径获取文件内容（单独查询，不会爆内存）
   Future<String?> getFileContent(String path) async {
-    // 先精确匹配
+    // 精确匹配
     var results = await db.query(
       'files',
-      where: 'path = ?',
+      columns: ['content'],
+      where: 'path = ? AND is_directory = 0',
       whereArgs: [path],
     );
 
-    if (results.isNotEmpty) {
+    if (results.isNotEmpty && results.first['content'] != null) {
       return results.first['content'] as String?;
     }
 
-    // 再用文件名匹配
+    // 文件名匹配
     final fileName = path.split('/').last;
     results = await db.query(
       'files',
+      columns: ['content'],
       where: 'name = ? AND is_directory = 0',
       whereArgs: [fileName],
     );
 
-    if (results.isNotEmpty) {
+    if (results.isNotEmpty && results.first['content'] != null) {
       return results.first['content'] as String?;
     }
 
     // 模糊匹配路径末尾
     results = await db.query(
       'files',
+      columns: ['content'],
       where: 'path LIKE ? AND is_directory = 0',
-      whereArgs: ['%$path'],
+      whereArgs: ['%/$fileName'],
     );
 
-    if (results.isNotEmpty) {
+    if (results.isNotEmpty && results.first['content'] != null) {
       return results.first['content'] as String?;
     }
 
     return null;
   }
 
-  // 获取所有文件
+  // 获取所有文件路径（不含content）
   Future<List<Map<String, dynamic>>> getAllFiles() async {
-    return await db.query('files', where: 'is_directory = 0');
+    return await db.query(
+      'files',
+      columns: ['id', 'name', 'path', 'parent_path', 'size'],
+      where: 'is_directory = 0',
+    );
   }
 
-  // 清空数据库
   Future<void> clearAll() async {
     await db.delete('files');
   }
 
-  // 删除文件
   Future<void> deleteFile(String path) async {
     await db.delete('files', where: 'path = ? OR parent_path LIKE ?', whereArgs: [path, '$path%']);
   }
