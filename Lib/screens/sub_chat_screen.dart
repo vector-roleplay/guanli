@@ -2,25 +2,30 @@
 
 import 'package:flutter/material.dart';
 import '../models/message.dart';
-import '../models/chat_session.dart';
+import '../models/sub_conversation.dart';
 import '../services/api_service.dart';
 import '../services/database_service.dart';
 import '../services/file_service.dart';
+import '../services/sub_conversation_service.dart';
 import '../widgets/message_bubble.dart';
 import '../widgets/chat_input.dart';
 import '../utils/message_detector.dart';
 import '../config/app_config.dart';
 
 class SubChatScreen extends StatefulWidget {
+  final SubConversation subConversation;
   final String initialMessage;
   final List<String> requestedPaths;
   final String directoryTree;
+  final bool isResuming;  // 是否是恢复已有会话
 
   const SubChatScreen({
     super.key,
+    required this.subConversation,
     required this.initialMessage,
     required this.requestedPaths,
     required this.directoryTree,
+    this.isResuming = false,
   });
 
   @override
@@ -28,14 +33,22 @@ class SubChatScreen extends StatefulWidget {
 }
 
 class _SubChatScreenState extends State<SubChatScreen> {
-  final ChatSession _session = ChatSession();
   final ScrollController _scrollController = ScrollController();
   final MessageDetector _detector = MessageDetector();
+  
+  late SubConversation _subConversation;
+  bool _isLoading = false;
+  String _streamingContent = '';
 
   @override
   void initState() {
     super.initState();
-    _initializeChat();
+    _subConversation = widget.subConversation;
+    
+    // 如果不是恢复会话，初始化发送文件
+    if (!widget.isResuming && widget.requestedPaths.isNotEmpty) {
+      _initializeChat();
+    }
   }
 
   @override
@@ -66,7 +79,10 @@ class _SubChatScreenState extends State<SubChatScreen> {
 
     String content = '【请求说明书】\n$message\n\n【文件目录】\n${widget.directoryTree}';
 
-    if (totalSize <= AppConfig.maxChunkSize) {
+    if (fileContents.isEmpty) {
+      content += '\n\n【注意】未找到请求的文件内容';
+      await _sendSystemMessage(content);
+    } else if (totalSize <= AppConfig.maxChunkSize) {
       content += '\n\n【文件内容】\n';
       for (var file in fileContents) {
         content += '--- ${file.path} ---\n${file.content}\n\n';
@@ -103,12 +119,7 @@ class _SubChatScreenState extends State<SubChatScreen> {
     }
   }
 
-  Future<void> _sendBatch(
-    String baseContent,
-    List<FileContent> batch,
-    int sentSize,
-    int totalSize,
-  ) async {
+  Future<void> _sendBatch(String baseContent, List<FileContent> batch, int sentSize, int totalSize) async {
     int batchSize = batch.fold<int>(0, (sum, f) => sum + f.size);
     int newSentSize = sentSize + batchSize;
     int percentage = ((newSentSize / totalSize) * 100).round();
@@ -126,12 +137,7 @@ class _SubChatScreenState extends State<SubChatScreen> {
     }
   }
 
-  Future<void> _sendLargeFile(
-    String baseContent,
-    FileContent file,
-    int sentSize,
-    int totalSize,
-  ) async {
+  Future<void> _sendLargeFile(String baseContent, FileContent file, int sentSize, int totalSize) async {
     final chunks = FileService.instance.splitContent(file.content, AppConfig.maxChunkSize);
     int chunksSent = 0;
 
@@ -151,14 +157,18 @@ class _SubChatScreenState extends State<SubChatScreen> {
   }
 
   Future<void> _waitForContinue() async {
-    while (true) {
+    int attempts = 0;
+    while (attempts < 60) {  // 最多等30秒
       await Future.delayed(const Duration(milliseconds: 500));
-      final lastMessage = _session.lastAssistantMessage;
-      if (lastMessage != null && lastMessage.content.contains('【请继续】')) {
-        break;
-      }
-      if (lastMessage != null && lastMessage.status == MessageStatus.sent) {
-        break;
+      attempts++;
+      
+      if (_subConversation.messages.isNotEmpty) {
+        final lastMessage = _subConversation.messages.last;
+        if (lastMessage.role == MessageRole.assistant && 
+            lastMessage.status == MessageStatus.sent &&
+            lastMessage.content.contains('【请继续】')) {
+          break;
+        }
       }
     }
   }
@@ -169,7 +179,9 @@ class _SubChatScreenState extends State<SubChatScreen> {
       content: content,
       status: MessageStatus.sent,
     );
-    _session.addMessage(systemMessage);
+    _subConversation.messages.add(systemMessage);
+    await SubConversationService.instance.update(_subConversation);
+    setState(() {});
     _scrollToBottom();
 
     final aiMessage = Message(
@@ -177,50 +189,98 @@ class _SubChatScreenState extends State<SubChatScreen> {
       content: '',
       status: MessageStatus.sending,
     );
-    _session.addMessage(aiMessage);
-    _session.setLoading(true);
+    _subConversation.messages.add(aiMessage);
+    setState(() {
+      _isLoading = true;
+      _streamingContent = '';
+    });
     _scrollToBottom();
 
     final stopwatch = Stopwatch()..start();
 
     try {
-      final response = await ApiService.sendToSubAI(
-        messages: _session.messages.where((m) => m.status != MessageStatus.sending).toList(),
+      final stream = ApiService.streamToSubAI(
+        messages: _subConversation.messages
+            .where((m) => m.status != MessageStatus.sending)
+            .toList(),
         directoryTree: widget.directoryTree,
       );
 
+      await for (var chunk in stream) {
+        _streamingContent += chunk;
+        final msgIndex = _subConversation.messages.indexWhere((m) => m.id == aiMessage.id);
+        if (msgIndex != -1) {
+          _subConversation.messages[msgIndex] = Message(
+            id: aiMessage.id,
+            role: MessageRole.assistant,
+            content: _streamingContent,
+            timestamp: aiMessage.timestamp,
+            status: MessageStatus.sending,
+          );
+          setState(() {});
+          _scrollToBottom();
+        }
+      }
+
       stopwatch.stop();
 
-      _session.updateMessage(
-        aiMessage.id,
-        content: response.content,
-        status: MessageStatus.sent,
-        tokenUsage: TokenUsage(
-          promptTokens: response.promptTokens,
-          completionTokens: response.completionTokens,
-          totalTokens: response.totalTokens,
-          duration: stopwatch.elapsedMilliseconds / 1000,
-        ),
-      );
+      final msgIndex = _subConversation.messages.indexWhere((m) => m.id == aiMessage.id);
+      if (msgIndex != -1) {
+        _subConversation.messages[msgIndex] = Message(
+          id: aiMessage.id,
+          role: MessageRole.assistant,
+          content: _streamingContent,
+          timestamp: aiMessage.timestamp,
+          status: MessageStatus.sent,
+          tokenUsage: TokenUsage(
+            promptTokens: 0,
+            completionTokens: _streamingContent.length ~/ 4,
+            totalTokens: _streamingContent.length ~/ 4,
+            duration: stopwatch.elapsedMilliseconds / 1000,
+          ),
+        );
+      }
+
+      await SubConversationService.instance.update(_subConversation);
+      setState(() {});
       _scrollToBottom();
 
-      await _handleAIResponse(response.content);
+      await _handleAIResponse(_streamingContent);
 
     } catch (e) {
-      _session.updateMessage(aiMessage.id, content: '发送失败: $e', status: MessageStatus.error);
+      final msgIndex = _subConversation.messages.indexWhere((m) => m.id == aiMessage.id);
+      if (msgIndex != -1) {
+        _subConversation.messages[msgIndex] = Message(
+          id: aiMessage.id,
+          role: MessageRole.assistant,
+          content: '发送失败: $e',
+          timestamp: aiMessage.timestamp,
+          status: MessageStatus.error,
+        );
+      }
+      await SubConversationService.instance.update(_subConversation);
+      setState(() {});
     } finally {
-      _session.setLoading(false);
+      setState(() {
+        _isLoading = false;
+        _streamingContent = '';
+      });
     }
   }
 
   Future<void> _handleAIResponse(String response) async {
+    // 检测是否返回主界面
     if (_detector.hasReturnToMain(response)) {
       if (mounted) {
-        Navigator.pop(context, response);
+        Navigator.pop(context, {
+          'completed': true,
+          'message': response,
+        });
       }
       return;
     }
 
+    // 检测是否继续请求文件
     if (_detector.hasRequestDoc(response)) {
       final paths = _detector.extractPaths(response);
       if (paths.isNotEmpty) {
@@ -238,7 +298,9 @@ class _SubChatScreenState extends State<SubChatScreen> {
       attachments: attachments,
       status: MessageStatus.sent,
     );
-    _session.addMessage(userMessage);
+    _subConversation.messages.add(userMessage);
+    await SubConversationService.instance.update(_subConversation);
+    setState(() {});
     _scrollToBottom();
 
     final aiMessage = Message(
@@ -246,84 +308,165 @@ class _SubChatScreenState extends State<SubChatScreen> {
       content: '',
       status: MessageStatus.sending,
     );
-    _session.addMessage(aiMessage);
-    _session.setLoading(true);
+    _subConversation.messages.add(aiMessage);
+    setState(() {
+      _isLoading = true;
+      _streamingContent = '';
+    });
     _scrollToBottom();
 
     final stopwatch = Stopwatch()..start();
 
     try {
-      final response = await ApiService.sendToSubAI(
-        messages: _session.messages.where((m) => m.status != MessageStatus.sending).toList(),
+      final stream = ApiService.streamToSubAI(
+        messages: _subConversation.messages
+            .where((m) => m.status != MessageStatus.sending)
+            .toList(),
         directoryTree: widget.directoryTree,
       );
 
+      await for (var chunk in stream) {
+        _streamingContent += chunk;
+        final msgIndex = _subConversation.messages.indexWhere((m) => m.id == aiMessage.id);
+        if (msgIndex != -1) {
+          _subConversation.messages[msgIndex] = Message(
+            id: aiMessage.id,
+            role: MessageRole.assistant,
+            content: _streamingContent,
+            timestamp: aiMessage.timestamp,
+            status: MessageStatus.sending,
+          );
+          setState(() {});
+          _scrollToBottom();
+        }
+      }
+
       stopwatch.stop();
 
-      _session.updateMessage(
-        aiMessage.id,
-        content: response.content,
-        status: MessageStatus.sent,
-        tokenUsage: TokenUsage(
-          promptTokens: response.promptTokens,
-          completionTokens: response.completionTokens,
-          totalTokens: response.totalTokens,
-          duration: stopwatch.elapsedMilliseconds / 1000,
-        ),
-      );
+      final msgIndex = _subConversation.messages.indexWhere((m) => m.id == aiMessage.id);
+      if (msgIndex != -1) {
+        _subConversation.messages[msgIndex] = Message(
+          id: aiMessage.id,
+          role: MessageRole.assistant,
+          content: _streamingContent,
+          timestamp: aiMessage.timestamp,
+          status: MessageStatus.sent,
+          tokenUsage: TokenUsage(
+            promptTokens: 0,
+            completionTokens: _streamingContent.length ~/ 4,
+            totalTokens: _streamingContent.length ~/ 4,
+            duration: stopwatch.elapsedMilliseconds / 1000,
+          ),
+        );
+      }
+
+      await SubConversationService.instance.update(_subConversation);
+      setState(() {});
       _scrollToBottom();
 
-      await _handleAIResponse(response.content);
+      await _handleAIResponse(_streamingContent);
 
     } catch (e) {
-      _session.updateMessage(aiMessage.id, content: '发送失败: $e', status: MessageStatus.error);
+      final msgIndex = _subConversation.messages.indexWhere((m) => m.id == aiMessage.id);
+      if (msgIndex != -1) {
+        _subConversation.messages[msgIndex] = Message(
+          id: aiMessage.id,
+          role: MessageRole.assistant,
+          content: '发送失败: $e',
+          timestamp: aiMessage.timestamp,
+          status: MessageStatus.error,
+        );
+      }
+      await SubConversationService.instance.update(_subConversation);
+      setState(() {});
     } finally {
-      _session.setLoading(false);
+      setState(() {
+        _isLoading = false;
+        _streamingContent = '';
+      });
     }
+  }
+
+  Future<void> _deleteMessage(int index) async {
+    _subConversation.messages.removeAt(index);
+    await SubConversationService.instance.update(_subConversation);
+    setState(() {});
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('子界面 - 文件处理'),
+        title: Text(_subConversation.title),
         centerTitle: true,
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
-          onPressed: () => Navigator.pop(context),
+          onPressed: () {
+            // 用户手动退出，不标记为完成
+            Navigator.pop(context, null);
+          },
         ),
+        actions: [
+          // 手动标记完成并返回
+          IconButton(
+            icon: const Icon(Icons.check_circle_outline),
+            tooltip: '完成并返回',
+            onPressed: () {
+              showDialog(
+                context: context,
+                builder: (context) => AlertDialog(
+                  title: const Text('完成子会话'),
+                  content: const Text('确定要完成此子会话并返回主界面吗？'),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(context),
+                      child: const Text('取消'),
+                    ),
+                    TextButton(
+                      onPressed: () {
+                        Navigator.pop(context);
+                        Navigator.pop(this.context, {
+                          'completed': true,
+                          'message': '',
+                        });
+                      },
+                      child: const Text('确定'),
+                    ),
+                  ],
+                ),
+              );
+            },
+          ),
+        ],
       ),
       body: Column(
         children: [
           Expanded(
-            child: ListenableBuilder(
-              listenable: _session,
-              builder: (context, _) {
-                if (_session.messages.isEmpty) {
-                  return const Center(
-                    child: CircularProgressIndicator(),
-                  );
-                }
-
-                return ListView.builder(
-                  controller: _scrollController,
-                  padding: const EdgeInsets.symmetric(vertical: 16),
-                  itemCount: _session.messages.length,
-                  itemBuilder: (context, index) {
-                    return MessageBubble(message: _session.messages[index]);
-                  },
-                );
-              },
-            ),
+            child: _subConversation.messages.isEmpty
+                ? Center(
+                    child: widget.isResuming
+                        ? const Text('会话已恢复，继续对话')
+                        : const CircularProgressIndicator(),
+                  )
+                : ListView.builder(
+                    controller: _scrollController,
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    itemCount: _subConversation.messages.length,
+                    itemBuilder: (context, index) {
+                      final message = _subConversation.messages[index];
+                      return MessageBubble(
+                        message: message,
+                        onRetry: message.status == MessageStatus.error
+                            ? () => _sendMessage(message.content, message.attachments)
+                            : null,
+                        onDelete: () => _deleteMessage(index),
+                      );
+                    },
+                  ),
           ),
-          ListenableBuilder(
-            listenable: _session,
-            builder: (context, _) {
-              return ChatInput(
-                onSend: _sendMessage,
-                enabled: !_session.isLoading,
-              );
-            },
+          ChatInput(
+            onSend: _sendMessage,
+            enabled: !_isLoading,
           ),
         ],
       ),
