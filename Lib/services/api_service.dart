@@ -1,6 +1,7 @@
 // lib/services/api_service.dart
 
 import 'dart:convert';
+import 'dart:async';
 import 'package:http/http.dart' as http;
 import '../models/message.dart';
 import '../config/app_config.dart';
@@ -44,7 +45,112 @@ class ApiService {
     }
   }
 
-  // 发送消息到主界面AI
+  // 流式发送到主界面AI
+  static Stream<String> streamToMainAI({
+    required List<Message> messages,
+    required String directoryTree,
+  }) {
+    final config = AppConfig.instance;
+    return _streamRequest(
+      apiUrl: config.mainApiUrl,
+      apiKey: config.mainApiKey,
+      model: config.mainModel,
+      messages: messages,
+      systemPrompt: config.mainPrompt,
+      directoryTree: directoryTree,
+    );
+  }
+
+  // 流式发送到子界面AI
+  static Stream<String> streamToSubAI({
+    required List<Message> messages,
+    required String directoryTree,
+  }) {
+    final config = AppConfig.instance;
+    return _streamRequest(
+      apiUrl: config.subApiUrl,
+      apiKey: config.subApiKey,
+      model: config.subModel,
+      messages: messages,
+      systemPrompt: config.subPrompt,
+      directoryTree: directoryTree,
+    );
+  }
+
+  static Stream<String> _streamRequest({
+    required String apiUrl,
+    required String apiKey,
+    required String model,
+    required List<Message> messages,
+    required String systemPrompt,
+    required String directoryTree,
+  }) async* {
+    final url = Uri.parse('$apiUrl/chat/completions');
+
+    List<Map<String, dynamic>> apiMessages = [];
+
+    if (systemPrompt.isNotEmpty || directoryTree.isNotEmpty) {
+      String systemContent = '';
+      if (directoryTree.isNotEmpty) {
+        systemContent += '【文件目录】\n$directoryTree\n\n';
+      }
+      if (systemPrompt.isNotEmpty) {
+        systemContent += systemPrompt;
+      }
+      apiMessages.add({
+        'role': 'system',
+        'content': systemContent.trim(),
+      });
+    }
+
+    for (var msg in messages) {
+      apiMessages.add(msg.toApiFormat());
+    }
+
+    final request = http.Request('POST', url);
+    request.headers['Content-Type'] = 'application/json';
+    request.headers['Authorization'] = 'Bearer $apiKey';
+    request.body = jsonEncode({
+      'model': model,
+      'messages': apiMessages,
+      'max_tokens': 8192,
+      'stream': true,
+    });
+
+    final response = await http.Client().send(request);
+
+    if (response.statusCode != 200) {
+      throw Exception('API请求失败: ${response.statusCode}');
+    }
+
+    await for (var chunk in response.stream.transform(utf8.decoder)) {
+      final lines = chunk.split('\n');
+      for (var line in lines) {
+        if (line.startsWith('data: ')) {
+          final data = line.substring(6).trim();
+          if (data == '[DONE]') {
+            return;
+          }
+          if (data.isNotEmpty) {
+            try {
+              final json = jsonDecode(data);
+              final delta = json['choices']?[0]?['delta'];
+              if (delta != null) {
+                final content = delta['content'];
+                if (content != null && content.isNotEmpty) {
+                  yield content;
+                }
+              }
+            } catch (e) {
+              // 解析错误，跳过
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // 非流式发送（保留作为备用）
   static Future<ApiResponse> sendToMainAI({
     required List<Message> messages,
     required String directoryTree,
@@ -60,7 +166,6 @@ class ApiService {
     );
   }
 
-  // 发送消息到子界面AI
   static Future<ApiResponse> sendToSubAI({
     required List<Message> messages,
     required String directoryTree,
@@ -115,7 +220,7 @@ class ApiService {
       body: jsonEncode({
         'model': model,
         'messages': apiMessages,
-        'max_tokens': 4096,
+        'max_tokens': 8192,
       }),
     );
 
