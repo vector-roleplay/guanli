@@ -234,23 +234,31 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _importDirectory() async {
-    final result = await FilePicker.platform.getDirectoryPath();
+  final result = await FilePicker.platform.getDirectoryPath();
 
-    if (result != null) {
-      setState(() => _isLoading = true);
+  if (result != null) {
+    setState(() => _isLoading = true);
 
-      await DatabaseService.instance.importDirectory(result);
+    try {
+      final count = await DatabaseService.instance.importDirectory(result);
       await _loadDirectoryTree();
-
-      setState(() => _isLoading = false);
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('目录导入完成')),
+          SnackBar(content: Text('导入完成，共 $count 个文件')),
         );
       }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('导入失败: $e')),
+        );
+      }
+    } finally {
+      setState(() => _isLoading = false);
     }
   }
+}
 
   Future<void> _clearDatabase() async {
     final confirm = await showDialog<bool>(
