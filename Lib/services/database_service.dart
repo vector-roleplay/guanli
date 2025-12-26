@@ -48,68 +48,90 @@ class DatabaseService {
   }
 
   // 导入文件夹（包含所有文件内容）
-  Future<void> importDirectory(String dirPath) async {
+  Future<int> importDirectory(String dirPath) async {
     final dir = Directory(dirPath);
-    if (!await dir.exists()) return;
+    if (!await dir.exists()) {
+      throw Exception('目录不存在: $dirPath');
+    }
 
-    final dirName = dir.path.split('/').last;
-    await _importRecursive(dir, '', dirName);
+    int fileCount = 0;
+    await _importRecursive(dir, '', (count) => fileCount = count);
+    return fileCount;
   }
 
-  Future<void> _importRecursive(Directory dir, String parentPath, String rootName) async {
-    final entities = await dir.list().toList();
+  Future<void> _importRecursive(Directory dir, String parentPath, Function(int) onCount) async {
+    int count = 0;
+    
+    try {
+      final entities = await dir.list(followLinks: false).toList();
 
-    for (var entity in entities) {
-      final name = entity.path.split('/').last;
-      final relativePath = parentPath.isEmpty ? name : '$parentPath/$name';
+      for (var entity in entities) {
+        final name = entity.path.split('/').last;
+        // 跳过隐藏文件
+        if (name.startsWith('.')) continue;
+        
+        final relativePath = parentPath.isEmpty ? name : '$parentPath/$name';
 
-      if (entity is Directory) {
-        // 保存目录
-        await db.insert(
-          'files',
-          {
-            'name': name,
-            'path': relativePath,
-            'parent_path': parentPath.isEmpty ? null : parentPath,
-            'is_directory': 1,
-            'created_at': DateTime.now().toIso8601String(),
-            'updated_at': DateTime.now().toIso8601String(),
-          },
-          conflictAlgorithm: ConflictAlgorithm.replace,
-        );
+        if (entity is Directory) {
+          // 保存目录
+          await db.insert(
+            'files',
+            {
+              'name': name,
+              'path': relativePath,
+              'parent_path': parentPath.isEmpty ? null : parentPath,
+              'is_directory': 1,
+              'created_at': DateTime.now().toIso8601String(),
+              'updated_at': DateTime.now().toIso8601String(),
+            },
+            conflictAlgorithm: ConflictAlgorithm.replace,
+          );
 
-        // 递归处理子目录
-        await _importRecursive(entity, relativePath, rootName);
-      } else if (entity is File) {
-        // 读取文件内容
-        String? content;
-        final size = await entity.length();
-
-        // 读取文件内容（限制10MB以内）
-        if (size < 10 * 1024 * 1024) {
+          // 递归处理子目录
+          await _importRecursive(entity, relativePath, onCount);
+        } else if (entity is File) {
+          // 读取文件内容
+          String? content;
+          int size = 0;
+          
           try {
-            content = await entity.readAsString();
+            size = await entity.length();
           } catch (e) {
-            // 二进制文件无法读取为文本，跳过内容
+            // 无法获取大小
           }
-        }
 
-        await db.insert(
-          'files',
-          {
-            'name': name,
-            'path': relativePath,
-            'parent_path': parentPath.isEmpty ? null : parentPath,
-            'is_directory': 0,
-            'size': size,
-            'content': content,
-            'created_at': DateTime.now().toIso8601String(),
-            'updated_at': DateTime.now().toIso8601String(),
-          },
-          conflictAlgorithm: ConflictAlgorithm.replace,
-        );
+          // 读取文件内容（限制5MB以内）
+          if (size > 0 && size < 5 * 1024 * 1024) {
+            try {
+              content = await entity.readAsString();
+            } catch (e) {
+              // 二进制文件无法读取为文本
+            }
+          }
+
+          await db.insert(
+            'files',
+            {
+              'name': name,
+              'path': relativePath,
+              'parent_path': parentPath.isEmpty ? null : parentPath,
+              'is_directory': 0,
+              'size': size,
+              'content': content,
+              'created_at': DateTime.now().toIso8601String(),
+              'updated_at': DateTime.now().toIso8601String(),
+            },
+            conflictAlgorithm: ConflictAlgorithm.replace,
+          );
+          
+          count++;
+        }
       }
+    } catch (e) {
+      print('遍历目录出错: $e');
     }
+    
+    onCount(count);
   }
 
   // 导入单个文件
@@ -118,10 +140,16 @@ class DatabaseService {
     if (!await file.exists()) return;
 
     final name = filePath.split('/').last;
-    final size = await file.length();
+    int size = 0;
+    
+    try {
+      size = await file.length();
+    } catch (e) {
+      // 无法获取大小
+    }
 
     String? content;
-    if (size < 10 * 1024 * 1024) {
+    if (size > 0 && size < 5 * 1024 * 1024) {
       try {
         content = await file.readAsString();
       } catch (e) {
