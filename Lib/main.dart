@@ -7,19 +7,16 @@ import 'dart:io';
 import 'screens/main_chat_screen.dart';
 import 'services/database_service.dart';
 import 'services/conversation_service.dart';
+import 'services/sub_conversation_service.dart';
 import 'config/app_config.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   
-  // 初始化数据库
   await DatabaseService.instance.init();
-  
-  // 加载配置
   await AppConfig.instance.load();
-  
-  // 加载会话
   await ConversationService.instance.load();
+  await SubConversationService.instance.load();
   
   runApp(const MyApp());
 }
@@ -81,31 +78,20 @@ class _PermissionWrapperState extends State<PermissionWrapper> {
       return;
     }
 
-    // 检查是否已有权限
     final status = await Permission.manageExternalStorage.status;
     
-    if (status.isGranted) {
-      setState(() {
-        _isChecking = false;
-        _hasPermission = true;
-      });
-    } else {
-      setState(() {
-        _isChecking = false;
-        _hasPermission = false;
-      });
-    }
+    setState(() {
+      _isChecking = false;
+      _hasPermission = status.isGranted;
+    });
   }
 
   Future<void> _requestPermission() async {
     final status = await Permission.manageExternalStorage.request();
     
     if (status.isGranted) {
-      setState(() {
-        _hasPermission = true;
-      });
+      setState(() => _hasPermission = true);
     } else if (status.isPermanentlyDenied) {
-      // 用户永久拒绝，需要去设置里开启
       _showSettingsDialog();
     }
   }
@@ -119,16 +105,13 @@ class _PermissionWrapperState extends State<PermissionWrapper> {
         content: const Text('请在系统设置中允许"管理所有文件"权限，否则无法导入文件目录。'),
         actions: [
           TextButton(
-            onPressed: () {
-              Navigator.pop(context);
-            },
+            onPressed: () => Navigator.pop(context),
             child: const Text('稍后'),
           ),
           TextButton(
             onPressed: () async {
               Navigator.pop(context);
               await openAppSettings();
-              // 等用户从设置返回后重新检查
               await Future.delayed(const Duration(seconds: 1));
               _checkPermission();
             },
@@ -143,9 +126,7 @@ class _PermissionWrapperState extends State<PermissionWrapper> {
   Widget build(BuildContext context) {
     if (_isChecking) {
       return const Scaffold(
-        body: Center(
-          child: CircularProgressIndicator(),
-        ),
+        body: Center(child: CircularProgressIndicator()),
       );
     }
 
@@ -165,10 +146,7 @@ class _PermissionWrapperState extends State<PermissionWrapper> {
                 const SizedBox(height: 24),
                 const Text(
                   '需要文件访问权限',
-                  style: TextStyle(
-                    fontSize: 24,
-                    fontWeight: FontWeight.bold,
-                  ),
+                  style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
                 ),
                 const SizedBox(height: 16),
                 Text(
@@ -179,15 +157,6 @@ class _PermissionWrapperState extends State<PermissionWrapper> {
                     color: Theme.of(context).colorScheme.onSurfaceVariant,
                   ),
                 ),
-                const SizedBox(height: 8),
-                Text(
-                  '此权限仅用于读取您主动导入的文件，不会访问其他数据。',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    fontSize: 14,
-                    color: Theme.of(context).colorScheme.outline,
-                  ),
-                ),
                 const SizedBox(height: 32),
                 FilledButton.icon(
                   onPressed: _requestPermission,
@@ -196,12 +165,7 @@ class _PermissionWrapperState extends State<PermissionWrapper> {
                 ),
                 const SizedBox(height: 16),
                 TextButton(
-                  onPressed: () {
-                    // 跳过权限，但功能受限
-                    setState(() {
-                      _hasPermission = true;
-                    });
-                  },
+                  onPressed: () => setState(() => _hasPermission = true),
                   child: const Text('暂时跳过（部分功能不可用）'),
                 ),
               ],
