@@ -33,13 +33,9 @@ class DatabaseService {
           )
         ''');
 
-        await db.execute('''
-          CREATE INDEX idx_files_path ON files(path)
-        ''');
-
-        await db.execute('''
-          CREATE INDEX idx_files_parent ON files(parent_path)
-        ''');
+        await db.execute('CREATE INDEX idx_files_path ON files(path)');
+        await db.execute('CREATE INDEX idx_files_parent ON files(parent_path)');
+        await db.execute('CREATE INDEX idx_files_name ON files(name)');
       },
     );
   }
@@ -51,15 +47,16 @@ class DatabaseService {
     return _database!;
   }
 
-  // 导入文件夹
+  // 导入文件夹（包含所有文件内容）
   Future<void> importDirectory(String dirPath) async {
     final dir = Directory(dirPath);
     if (!await dir.exists()) return;
 
-    await _importRecursive(dir, '');
+    final dirName = dir.path.split('/').last;
+    await _importRecursive(dir, '', dirName);
   }
 
-  Future<void> _importRecursive(Directory dir, String parentPath) async {
+  Future<void> _importRecursive(Directory dir, String parentPath, String rootName) async {
     final entities = await dir.list().toList();
 
     for (var entity in entities) {
@@ -82,18 +79,18 @@ class DatabaseService {
         );
 
         // 递归处理子目录
-        await _importRecursive(entity, relativePath);
+        await _importRecursive(entity, relativePath, rootName);
       } else if (entity is File) {
-        // 读取文件内容（仅文本文件）
+        // 读取文件内容
         String? content;
         final size = await entity.length();
 
-        if (size < 1024 * 1024) {
-          // 小于1MB才读取内容
+        // 读取文件内容（限制10MB以内）
+        if (size < 10 * 1024 * 1024) {
           try {
             content = await entity.readAsString();
           } catch (e) {
-            // 非文本文件
+            // 二进制文件无法读取为文本，跳过内容
           }
         }
 
@@ -124,7 +121,7 @@ class DatabaseService {
     final size = await file.length();
 
     String? content;
-    if (size < 1024 * 1024) {
+    if (size < 10 * 1024 * 1024) {
       try {
         content = await file.readAsString();
       } catch (e) {
@@ -155,22 +152,17 @@ class DatabaseService {
     if (files.isEmpty) return '(暂无文件)';
 
     StringBuffer tree = StringBuffer();
-    Map<String, int> indentMap = {};
-
+    
     for (var file in files) {
       final path = file['path'] as String;
       final name = file['name'] as String;
       final isDir = file['is_directory'] == 1;
-      final parentPath = file['parent_path'] as String?;
-
-      int indent = 0;
-      if (parentPath != null) {
-        indent = (indentMap[parentPath] ?? 0) + 1;
-      }
-      indentMap[path] = indent;
-
-      final prefix = '  ' * indent;
+      
+      // 计算缩进层级
+      final depth = path.split('/').length - 1;
+      final prefix = '  ' * depth;
       final icon = isDir ? '📁' : '📄';
+      
       tree.writeln('$prefix$icon $name');
     }
 
@@ -179,7 +171,8 @@ class DatabaseService {
 
   // 根据路径获取文件内容
   Future<String?> getFileContent(String path) async {
-    final results = await db.query(
+    // 先精确匹配
+    var results = await db.query(
       'files',
       where: 'path = ?',
       whereArgs: [path],
@@ -188,6 +181,30 @@ class DatabaseService {
     if (results.isNotEmpty) {
       return results.first['content'] as String?;
     }
+
+    // 再用文件名匹配
+    final fileName = path.split('/').last;
+    results = await db.query(
+      'files',
+      where: 'name = ? AND is_directory = 0',
+      whereArgs: [fileName],
+    );
+
+    if (results.isNotEmpty) {
+      return results.first['content'] as String?;
+    }
+
+    // 模糊匹配路径末尾
+    results = await db.query(
+      'files',
+      where: 'path LIKE ? AND is_directory = 0',
+      whereArgs: ['%$path'],
+    );
+
+    if (results.isNotEmpty) {
+      return results.first['content'] as String?;
+    }
+
     return null;
   }
 
