@@ -3,8 +3,8 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'screens/main_chat_screen.dart';
-import 'screens/settings_screen.dart';
 import 'services/database_service.dart';
+import 'services/conversation_service.dart';
 import 'config/app_config.dart';
 
 void main() async {
@@ -15,6 +15,9 @@ void main() async {
   
   // 加载配置
   await AppConfig.instance.load();
+  
+  // 加载会话
+  await ConversationService.instance.load();
   
   runApp(const MyApp());
 }
