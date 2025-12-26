@@ -10,31 +10,22 @@ dependencies:
   flutter:
     sdk: flutter
   
-  # 状态管理
   provider: any
-  
-  # 网络请求
   http: any
   dio: any
-  
-  # 本地数据库
   sqflite: any
   path: any
-  
-  # 文件处理
-  file_picker: ^10.3.8
+  file_picker: any
   path_provider: any
   mime: any
-  
-  # UI相关
   flutter_markdown: any
-  image_picker: ^1.2.1
-  
-  # 本地存储
+  image_picker: any
   shared_preferences: any
-  
-  # 工具
   uuid: any
+  
+  # 权限请求
+  permission_handler: any
+  device_info_plus: any
 
 dev_dependencies:
   flutter_test:
