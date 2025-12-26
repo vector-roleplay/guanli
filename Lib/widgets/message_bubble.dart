@@ -2,17 +2,18 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_markdown/flutter_markdown.dart';
 import '../models/message.dart';
 
 class MessageBubble extends StatefulWidget {
   final Message message;
   final VoidCallback? onRetry;
+  final VoidCallback? onDelete;  // 新增删除回调
 
   const MessageBubble({
     super.key,
     required this.message,
     this.onRetry,
+    this.onDelete,
   });
 
   @override
@@ -47,10 +48,7 @@ class _MessageBubbleState extends State<MessageBubble> {
               padding: const EdgeInsets.only(bottom: 4, left: 4, right: 4),
               child: Text(
                 isUser ? '你' : 'AI',
-                style: TextStyle(
-                  fontSize: 12,
-                  color: colorScheme.outline,
-                ),
+                style: TextStyle(fontSize: 12, color: colorScheme.outline),
               ),
             ),
             GestureDetector(
@@ -105,8 +103,8 @@ class _MessageBubbleState extends State<MessageBubble> {
     final isUser = widget.message.role == MessageRole.user;
     final colorScheme = Theme.of(context).colorScheme;
 
-    // 检查是否有思维链
-    final thinkingRegex = RegExp(r'<thinking>([\s\S]*?)</thinking>', caseSensitive: false);
+    // 检查思维链
+    final thinkingRegex = RegExp(r'<think(?:ing)?>([\s\S]*?)</think(?:ing)?>', caseSensitive: false);
     final match = thinkingRegex.firstMatch(content);
 
     if (match != null && !isUser) {
@@ -116,7 +114,6 @@ class _MessageBubbleState extends State<MessageBubble> {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // 思维链折叠区域
           GestureDetector(
             onTap: () => setState(() => _thinkingExpanded = !_thinkingExpanded),
             child: Container(
@@ -148,10 +145,7 @@ class _MessageBubbleState extends State<MessageBubble> {
                       const Spacer(),
                       Text(
                         _thinkingExpanded ? '点击折叠' : '点击展开',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: colorScheme.outline,
-                        ),
+                        style: TextStyle(fontSize: 12, color: colorScheme.outline),
                       ),
                     ],
                   ),
@@ -173,28 +167,23 @@ class _MessageBubbleState extends State<MessageBubble> {
               ),
             ),
           ),
-          // 主要内容
           if (mainContent.isNotEmpty)
-            _buildSelectableMarkdown(context, mainContent),
+            _buildSelectableText(context, mainContent),
         ],
       );
     }
 
-    return _buildSelectableMarkdown(context, content);
+    return _buildSelectableText(context, content);
   }
 
-  Widget _buildSelectableMarkdown(BuildContext context, String content) {
+  Widget _buildSelectableText(BuildContext context, String content) {
     final isUser = widget.message.role == MessageRole.user;
     final colorScheme = Theme.of(context).colorScheme;
 
-    return SelectableText.rich(
-      TextSpan(
-        text: content,
-        style: TextStyle(
-          color: isUser
-              ? colorScheme.onPrimaryContainer
-              : colorScheme.onSurfaceVariant,
-        ),
+    return SelectableText(
+      content,
+      style: TextStyle(
+        color: isUser ? colorScheme.onPrimaryContainer : colorScheme.onSurfaceVariant,
       ),
       contextMenuBuilder: _buildChineseContextMenu,
     );
@@ -203,37 +192,29 @@ class _MessageBubbleState extends State<MessageBubble> {
   Widget _buildChineseContextMenu(BuildContext context, EditableTextState editableTextState) {
     final List<ContextMenuButtonItem> buttonItems = [];
 
-    // 复制
     if (editableTextState.copyEnabled) {
       buttonItems.add(ContextMenuButtonItem(
         label: '复制',
-        onPressed: () {
-          editableTextState.copySelection(SelectionChangedCause.toolbar);
-        },
+        onPressed: () => editableTextState.copySelection(SelectionChangedCause.toolbar),
       ));
     }
 
-    // 全选
     if (editableTextState.selectAllEnabled) {
       buttonItems.add(ContextMenuButtonItem(
         label: '全选',
-        onPressed: () {
-          editableTextState.selectAll(SelectionChangedCause.toolbar);
-        },
+        onPressed: () => editableTextState.selectAll(SelectionChangedCause.toolbar),
       ));
     }
 
-    // 分享（可选）
     buttonItems.add(ContextMenuButtonItem(
       label: '分享',
       onPressed: () {
         final text = editableTextState.textEditingValue.selection
             .textInside(editableTextState.textEditingValue.text);
-        // 这里可以调用系统分享功能
         Clipboard.setData(ClipboardData(text: text));
         editableTextState.hideToolbar();
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('已复制，可粘贴分享'), duration: Duration(seconds: 1)),
+          const SnackBar(content: Text('已复制'), duration: Duration(seconds: 1)),
         );
       },
     ));
@@ -253,21 +234,14 @@ class _MessageBubbleState extends State<MessageBubble> {
         children: [
           Icon(Icons.error_outline, size: 16, color: colorScheme.error),
           const SizedBox(width: 4),
-          Text(
-            '发送失败',
-            style: TextStyle(fontSize: 12, color: colorScheme.error),
-          ),
+          Text('发送失败', style: TextStyle(fontSize: 12, color: colorScheme.error)),
           if (widget.onRetry != null) ...[
             const SizedBox(width: 8),
             GestureDetector(
               onTap: widget.onRetry,
               child: Text(
                 '重试',
-                style: TextStyle(
-                  fontSize: 12,
-                  color: colorScheme.primary,
-                  fontWeight: FontWeight.bold,
-                ),
+                style: TextStyle(fontSize: 12, color: colorScheme.primary, fontWeight: FontWeight.bold),
               ),
             ),
           ],
@@ -284,12 +258,12 @@ class _MessageBubbleState extends State<MessageBubble> {
       spacing: 12,
       children: [
         if (widget.message.role == MessageRole.assistant && usage != null) ...[
-          _buildTokenChip(context, '↑ ${_formatNumber(usage.promptTokens)}', colorScheme.outline.withOpacity(0.7)),
-          _buildTokenChip(context, '↓ ${_formatNumber(usage.completionTokens)}', colorScheme.outline.withOpacity(0.7)),
+          _buildTokenChip('↑ ${_formatNumber(usage.promptTokens)}', colorScheme.outline.withOpacity(0.7)),
+          _buildTokenChip('↓ ${_formatNumber(usage.completionTokens)}', colorScheme.outline.withOpacity(0.7)),
           if (usage.tokensPerSecond > 0)
-            _buildTokenChip(context, '⚡${usage.tokensPerSecond.toStringAsFixed(1)}/s', colorScheme.outline.withOpacity(0.7)),
+            _buildTokenChip('⚡${usage.tokensPerSecond.toStringAsFixed(1)}/s', colorScheme.outline.withOpacity(0.7)),
           if (usage.duration > 0)
-            _buildTokenChip(context, '⏱${usage.duration.toStringAsFixed(1)}s', colorScheme.outline.withOpacity(0.7)),
+            _buildTokenChip('⏱${usage.duration.toStringAsFixed(1)}s', colorScheme.outline.withOpacity(0.7)),
         ],
         Text(
           _formatTime(widget.message.timestamp),
@@ -299,7 +273,7 @@ class _MessageBubbleState extends State<MessageBubble> {
     );
   }
 
-  Widget _buildTokenChip(BuildContext context, String text, Color color) {
+  Widget _buildTokenChip(String text, Color color) {
     return Text(text, style: TextStyle(fontSize: 10, color: color));
   }
 
@@ -326,8 +300,6 @@ class _MessageBubbleState extends State<MessageBubble> {
               Icon(_getFileIcon(attachment.mimeType), size: 18, color: Theme.of(context).colorScheme.primary),
               const SizedBox(width: 6),
               Text(attachment.name, style: const TextStyle(fontSize: 13)),
-              const SizedBox(width: 6),
-              Text(_formatFileSize(attachment.size), style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.outline)),
             ],
           ),
         );
@@ -353,8 +325,40 @@ class _MessageBubbleState extends State<MessageBubble> {
                 );
               },
             ),
+            if (widget.onDelete != null)
+              ListTile(
+                leading: Icon(Icons.delete_outline, color: Theme.of(context).colorScheme.error),
+                title: Text('删除此消息', style: TextStyle(color: Theme.of(context).colorScheme.error)),
+                onTap: () {
+                  Navigator.pop(context);
+                  _confirmDelete(context);
+                },
+              ),
           ],
         ),
+      ),
+    );
+  }
+
+  void _confirmDelete(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('删除消息'),
+        content: const Text('确定要删除这条消息吗？'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context);
+              widget.onDelete?.call();
+            },
+            child: Text('删除', style: TextStyle(color: Theme.of(context).colorScheme.error)),
+          ),
+        ],
       ),
     );
   }
@@ -366,15 +370,7 @@ class _MessageBubbleState extends State<MessageBubble> {
     if (mimeType.contains('pdf')) return Icons.picture_as_pdf;
     if (mimeType.contains('word') || mimeType.contains('document')) return Icons.description;
     if (mimeType.contains('sheet') || mimeType.contains('excel')) return Icons.table_chart;
-    if (mimeType.contains('json') || mimeType.contains('xml')) return Icons.data_object;
-    if (mimeType.contains('text')) return Icons.article;
     return Icons.insert_drive_file;
-  }
-
-  String _formatFileSize(int bytes) {
-    if (bytes < 1024) return '$bytes B';
-    if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
-    return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
   }
 
   String _formatTime(DateTime time) {
