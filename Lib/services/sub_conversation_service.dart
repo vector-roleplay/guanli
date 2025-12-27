@@ -35,34 +35,45 @@ class SubConversationService {
   }
 
   // 创建子会话
-  Future<SubConversation> create(String parentConversationId, String title) async {
+  Future<SubConversation> create({
+    required String parentId,
+    required String rootConversationId,
+    required int level,
+  }) async {
     final sub = SubConversation(
-      parentConversationId: parentConversationId,
-      title: title.length > 20 ? '${title.substring(0, 20)}...' : title,
+      parentId: parentId,
+      rootConversationId: rootConversationId,
+      level: level,
     );
     _subConversations.add(sub);
     await save();
     return sub;
   }
 
-  // 获取某个主会话的所有未完成子会话
-  List<SubConversation> getByParentId(String parentConversationId) {
+  // 获取某个父级下的所有子会话
+  List<SubConversation> getByParentId(String parentId) {
+    return _subConversations.where((s) => s.parentId == parentId).toList();
+  }
+
+  // 获取某个根主会话的所有子会话
+  List<SubConversation> getByRootId(String rootConversationId) {
+    return _subConversations.where((s) => s.rootConversationId == rootConversationId).toList();
+  }
+
+  // 获取某个根主会话下某一级别的子会话
+  List<SubConversation> getByRootIdAndLevel(String rootConversationId, int level) {
     return _subConversations
-        .where((s) => s.parentConversationId == parentConversationId && !s.isCompleted)
+        .where((s) => s.rootConversationId == rootConversationId && s.level == level)
         .toList();
   }
 
-  // 标记为已完成
-  Future<void> markCompleted(String id) async {
-    final index = _subConversations.indexWhere((s) => s.id == id);
-    if (index != -1) {
-      _subConversations[index].isCompleted = true;
-      await save();
-    }
-  }
-
-  // 删除子会话
+  // 删除子会话（同时删除其下级子会话）
   Future<void> delete(String id) async {
+    // 递归删除下级
+    final children = _subConversations.where((s) => s.parentId == id).toList();
+    for (var child in children) {
+      await delete(child.id);
+    }
     _subConversations.removeWhere((s) => s.id == id);
     await save();
   }
@@ -86,19 +97,9 @@ class SubConversationService {
     }
   }
 
-  // 添加消息
-  Future<void> addMessage(String subId, Message message) async {
-    final index = _subConversations.indexWhere((s) => s.id == subId);
-    if (index != -1) {
-      _subConversations[index].messages.add(message);
-      _subConversations[index].updatedAt = DateTime.now();
-      await save();
-    }
-  }
-
   // 删除某主会话的所有子会话
-  Future<void> deleteByParentId(String parentConversationId) async {
-    _subConversations.removeWhere((s) => s.parentConversationId == parentConversationId);
+  Future<void> deleteByRootId(String rootConversationId) async {
+    _subConversations.removeWhere((s) => s.rootConversationId == rootConversationId);
     await save();
   }
 }
