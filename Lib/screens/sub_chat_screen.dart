@@ -75,24 +75,39 @@ class _SubChatScreenState extends State<SubChatScreen> {
   }
 
   Future<void> _sendFilesWithMessage(String message, List<String> paths) async {
-    // 获取文件内容
-    final fileContents = await FileService.instance.getFilesContent(paths);
-    
-    // 构建显示内容（简短版）
-    String displayContent = '【申请${_subConversation.levelName}子界面】\n$message\n\n【文件目录】\n${widget.directoryTree}';
-    
-    // 构建完整内容（发送给API）
-    String fullContent = displayContent;
-    if (fileContents.isNotEmpty) {
-      fullContent += '\n\n【文件内容】\n';
-      for (var file in fileContents) {
-        fullContent += '--- ${file.path} ---\n${file.content}\n\n';
-      }
-    } else {
-      fullContent += '\n\n【注意】未找到请求的文件';
-    }
+  // 获取文件内容
+  final fileContents = await FileService.instance.getFilesContent(paths);
+  
+  // 计算总token数
+  int totalTokens = 0;
+  for (var file in fileContents) {
+    totalTokens += ApiService.estimateTokens(file.content);
+  }
+  totalTokens += ApiService.estimateTokens(message);
+  totalTokens += ApiService.estimateTokens(widget.directoryTree);
 
-    // 创建内嵌文件列表
+  // 检查是否超过90万token
+  bool exceedsLimit = totalTokens > AppConfig.maxTokens;
+  String warningText = exceedsLimit ? '\n\n【已超过900K】' : '';
+  
+  // 构建显示内容（简短版）
+  String displayContent = '【申请${_subConversation.levelName}子界面】\n$message\n\n【文件目录】\n${widget.directoryTree}$warningText';
+  
+  if (fileContents.isEmpty) {
+    // 没有找到文件
+    String fullContent = '$displayContent\n\n【注意】未找到请求的文件';
+    await _sendSystemMessage(
+      displayContent: displayContent,
+      fullContent: fullContent,
+      embeddedFiles: [],
+    );
+  } else if (!exceedsLimit) {
+    // 未超过限制，一次性发送所有文件
+    String fullContent = displayContent + '\n\n【文件内容】\n';
+    for (var file in fileContents) {
+      fullContent += '--- ${file.path} ---\n${file.content}\n\n';
+    }
+    
     List<EmbeddedFile> embeddedFiles = fileContents
         .map((f) => EmbeddedFile(path: f.path, content: f.content, size: f.size))
         .toList();
@@ -102,108 +117,246 @@ class _SubChatScreenState extends State<SubChatScreen> {
       fullContent: fullContent,
       embeddedFiles: embeddedFiles,
     );
+  } else {
+    // 超过限制，需要分批发送
+    await _sendFilesInChunks(displayContent, fileContents, warningText);
+  }
+}
+
+Future<void> _sendFilesInChunks(String baseContent, List<FileContent> files, String warningText) async {
+  int sentTokens = 0;
+  int totalTokens = files.fold<int>(0, (sum, f) => sum + ApiService.estimateTokens(f.content));
+  
+  List<FileContent> currentBatch = [];
+  int currentBatchTokens = 0;
+
+  for (var file in files) {
+    int fileTokens = ApiService.estimateTokens(file.content);
+    
+    if (fileTokens > AppConfig.maxTokens) {
+      // 单个文件过大，需要分割
+      if (currentBatch.isNotEmpty) {
+        await _sendBatch(baseContent, currentBatch, sentTokens, totalTokens, warningText);
+        sentTokens += currentBatchTokens;
+        currentBatch = [];
+        currentBatchTokens = 0;
+      }
+      await _sendLargeFile(baseContent, file, sentTokens, totalTokens, warningText);
+      sentTokens += fileTokens;
+    } else if (currentBatchTokens + fileTokens > AppConfig.maxTokens) {
+      // 当前批次已满，发送
+      await _sendBatch(baseContent, currentBatch, sentTokens, totalTokens, warningText);
+      sentTokens += currentBatchTokens;
+      currentBatch = [file];
+      currentBatchTokens = fileTokens;
+    } else {
+      currentBatch.add(file);
+      currentBatchTokens += fileTokens;
+    }
   }
 
-  Future<void> _sendSystemMessage({
-    required String displayContent,
-    required String fullContent,
-    List<EmbeddedFile>? embeddedFiles,
-  }) async {
-    final systemMessage = Message(
-      role: MessageRole.user,
-      content: displayContent,
+  // 发送剩余的
+  if (currentBatch.isNotEmpty) {
+    await _sendBatch(baseContent, currentBatch, sentTokens, totalTokens, warningText);
+  }
+}
+
+Future<void> _sendBatch(String baseContent, List<FileContent> batch, int sentTokens, int totalTokens, String warningText) async {
+  int batchTokens = batch.fold<int>(0, (sum, f) => sum + ApiService.estimateTokens(f.content));
+  int newSentTokens = sentTokens + batchTokens;
+  int percentage = ((newSentTokens / totalTokens) * 100).round();
+
+  String displayContent = '$baseContent\n\n本次发送 $percentage%$warningText';
+  String fullContent = '$baseContent\n\n【文件内容】\n';
+  for (var file in batch) {
+    fullContent += '--- ${file.path} ---\n${file.content}\n\n';
+  }
+  fullContent += '\n本次文件已发送$percentage%$warningText';
+
+  List<EmbeddedFile> embeddedFiles = batch
+      .map((f) => EmbeddedFile(path: f.path, content: f.content, size: f.size))
+      .toList();
+
+  await _sendSystemMessage(
+    displayContent: displayContent,
+    fullContent: fullContent,
+    embeddedFiles: embeddedFiles,
+  );
+
+  if (percentage < 100) {
+    await _waitForContinue();
+  }
+}
+
+Future<void> _sendLargeFile(String baseContent, FileContent file, int sentTokens, int totalTokens, String warningText) async {
+  // 按token限制分割文件内容
+  final chunks = _splitContentByTokens(file.content, AppConfig.maxTokens);
+  int chunksSent = 0;
+  int fileTokens = ApiService.estimateTokens(file.content);
+
+  for (var chunk in chunks) {
+    chunksSent++;
+    int chunkTokens = ApiService.estimateTokens(chunk);
+    int overallPercentage = (((sentTokens + (fileTokens * chunksSent / chunks.length)) / totalTokens) * 100).round();
+
+    String displayContent = '$baseContent\n\n${file.path} (第$chunksSent/${chunks.length}部分) $overallPercentage%$warningText';
+    String fullContent = '$baseContent\n\n【文件内容 - ${file.path} (第$chunksSent/${chunks.length}部分)】\n$chunk';
+    fullContent += '\n\n本次文件已发送$overallPercentage%$warningText';
+
+    await _sendSystemMessage(
+      displayContent: displayContent,
       fullContent: fullContent,
-      embeddedFiles: embeddedFiles ?? [],
-      status: MessageStatus.sent,
+      embeddedFiles: [EmbeddedFile(path: '${file.path} (第$chunksSent/${chunks.length}部分)', content: chunk, size: chunk.length)],
     );
-    _subConversation.messages.add(systemMessage);
-    await SubConversationService.instance.update(_subConversation);
-    setState(() {});
-    _scrollToBottom();
 
-    final aiMessage = Message(
-      role: MessageRole.assistant,
-      content: '',
-      status: MessageStatus.sending,
-    );
-    _subConversation.messages.add(aiMessage);
-    setState(() {
-      _isLoading = true;
-      _streamingContent = '';
-    });
-    _scrollToBottom();
+    if (chunksSent < chunks.length) {
+      await _waitForContinue();
+    }
+  }
+}
 
-    final stopwatch = Stopwatch()..start();
+// 按token限制分割内容
+List<String> _splitContentByTokens(String content, int maxTokens) {
+  List<String> chunks = [];
+  final lines = content.split('\n');
+  StringBuffer currentChunk = StringBuffer();
+  int currentTokens = 0;
 
-    try {
-      final stream = ApiService.streamToSubAI(
-        messages: _subConversation.messages
-            .where((m) => m.status != MessageStatus.sending)
-            .toList(),
-        directoryTree: widget.directoryTree,
-        level: _subConversation.level,
-      );
+  for (var line in lines) {
+    int lineTokens = ApiService.estimateTokens(line);
+    
+    if (lineTokens > maxTokens) {
+      // 单行过长，强制分割
+      if (currentChunk.isNotEmpty) {
+        chunks.add(currentChunk.toString());
+        currentChunk.clear();
+        currentTokens = 0;
+      }
+      
+      // 按字符分割长行
+      int charsPerChunk = maxTokens * 3; // 约3字符/token
+      for (int i = 0; i < line.length; i += charsPerChunk) {
+        final end = (i + charsPerChunk > line.length) ? line.length : i + charsPerChunk;
+        chunks.add(line.substring(i, end));
+      }
+    } else if (currentTokens + lineTokens > maxTokens) {
+      // 当前chunk已满
+      chunks.add(currentChunk.toString());
+      currentChunk.clear();
+      currentChunk.writeln(line);
+      currentTokens = lineTokens;
+    } else {
+      currentChunk.writeln(line);
+      currentTokens += lineTokens;
+    }
+  }
 
-      await for (var chunk in stream) {
-        _streamingContent += chunk;
+  if (currentChunk.isNotEmpty) {
+    chunks.add(currentChunk.toString());
+  }
+
+  return chunks;
+}
+
+  Future<void> _sendSystemMessage({
+  required String displayContent,
+  required String fullContent,
+  List<EmbeddedFile>? embeddedFiles,
+}) async {
+  final systemMessage = Message(
+    role: MessageRole.user,
+    content: displayContent,
+    fullContent: fullContent,
+    embeddedFiles: embeddedFiles ?? [],
+    status: MessageStatus.sent,
+  );
+  _subConversation.messages.add(systemMessage);
+  await SubConversationService.instance.update(_subConversation);
+  setState(() {});
+  _scrollToBottom();
+
+  final aiMessage = Message(
+    role: MessageRole.assistant,
+    content: '',
+    status: MessageStatus.sending,
+  );
+  _subConversation.messages.add(aiMessage);
+  setState(() {
+    _isLoading = true;
+  });
+  _scrollToBottom();
+
+  final stopwatch = Stopwatch()..start();
+
+  try {
+    String fullResponseContent = '';
+    
+    final result = await ApiService.streamToSubAIWithTokens(
+      messages: _subConversation.messages
+          .where((m) => m.status != MessageStatus.sending)
+          .toList(),
+      directoryTree: widget.directoryTree,
+      level: _subConversation.level,
+      onChunk: (chunk) {
+        fullResponseContent += chunk;
         final msgIndex = _subConversation.messages.indexWhere((m) => m.id == aiMessage.id);
         if (msgIndex != -1) {
           _subConversation.messages[msgIndex] = Message(
             id: aiMessage.id,
             role: MessageRole.assistant,
-            content: _streamingContent,
+            content: fullResponseContent,
             timestamp: aiMessage.timestamp,
             status: MessageStatus.sending,
           );
           setState(() {});
           _scrollToBottom();
         }
-      }
+      },
+    );
 
-      stopwatch.stop();
+    stopwatch.stop();
 
-      final msgIndex = _subConversation.messages.indexWhere((m) => m.id == aiMessage.id);
-      if (msgIndex != -1) {
-        _subConversation.messages[msgIndex] = Message(
-          id: aiMessage.id,
-          role: MessageRole.assistant,
-          content: _streamingContent,
-          timestamp: aiMessage.timestamp,
-          status: MessageStatus.sent,
-          tokenUsage: TokenUsage(
-            promptTokens: 0,
-            completionTokens: _streamingContent.length ~/ 4,
-            totalTokens: _streamingContent.length ~/ 4,
-            duration: stopwatch.elapsedMilliseconds / 1000,
-          ),
-        );
-      }
-
-      await SubConversationService.instance.update(_subConversation);
-      setState(() {});
-      _scrollToBottom();
-
-      await _handleAIResponse(_streamingContent);
-
-    } catch (e) {
-      final msgIndex = _subConversation.messages.indexWhere((m) => m.id == aiMessage.id);
-      if (msgIndex != -1) {
-        _subConversation.messages[msgIndex] = Message(
-          id: aiMessage.id,
-          role: MessageRole.assistant,
-          content: '发送失败: $e',
-          timestamp: aiMessage.timestamp,
-          status: MessageStatus.error,
-        );
-      }
-      await SubConversationService.instance.update(_subConversation);
-      setState(() {});
-    } finally {
-      setState(() {
-        _isLoading = false;
-        _streamingContent = '';
-      });
+    final msgIndex = _subConversation.messages.indexWhere((m) => m.id == aiMessage.id);
+    if (msgIndex != -1) {
+      _subConversation.messages[msgIndex] = Message(
+        id: aiMessage.id,
+        role: MessageRole.assistant,
+        content: result.content,
+        timestamp: aiMessage.timestamp,
+        status: MessageStatus.sent,
+        tokenUsage: TokenUsage(
+          promptTokens: result.estimatedPromptTokens,
+          completionTokens: result.estimatedCompletionTokens,
+          totalTokens: result.estimatedPromptTokens + result.estimatedCompletionTokens,
+          duration: stopwatch.elapsedMilliseconds / 1000,
+        ),
+      );
     }
+
+    await SubConversationService.instance.update(_subConversation);
+    setState(() {});
+    _scrollToBottom();
+
+    await _handleAIResponse(result.content);
+
+  } catch (e) {
+    final msgIndex = _subConversation.messages.indexWhere((m) => m.id == aiMessage.id);
+    if (msgIndex != -1) {
+      _subConversation.messages[msgIndex] = Message(
+        id: aiMessage.id,
+        role: MessageRole.assistant,
+        content: '发送失败: $e',
+        timestamp: aiMessage.timestamp,
+        status: MessageStatus.error,
+      );
+    }
+    await SubConversationService.instance.update(_subConversation);
+    setState(() {});
+  } finally {
+    setState(() {
+      _isLoading = false;
+    });
+  }
   }
 
   Future<void> _handleAIResponse(String response) async {
