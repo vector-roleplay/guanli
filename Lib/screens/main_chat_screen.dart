@@ -127,54 +127,55 @@ class _MainChatScreenState extends State<MainChatScreen> {
     final stopwatch = Stopwatch()..start();
 
     try {
-      final stream = ApiService.streamToMainAI(
-        messages: _currentConversation!.messages
-            .where((m) => m.status != MessageStatus.sending)
-            .toList(),
-        directoryTree: _directoryTree,
-      );
-
-      await for (var chunk in stream) {
-        _streamingContent += chunk;
-        final msgIndex = _currentConversation!.messages.indexWhere((m) => m.id == aiMessage.id);
-        if (msgIndex != -1) {
-          _currentConversation!.messages[msgIndex] = Message(
-            id: aiMessage.id,
-            role: MessageRole.assistant,
-            content: _streamingContent,
-            timestamp: aiMessage.timestamp,
-            status: MessageStatus.sending,
-          );
-          setState(() {});
-          _scrollToBottom();
-        }
-      }
-
-      stopwatch.stop();
-
+  String fullContent = '';
+  
+  final result = await ApiService.streamToMainAIWithTokens(
+    messages: _currentConversation!.messages
+        .where((m) => m.status != MessageStatus.sending)
+        .toList(),
+    directoryTree: _directoryTree,
+    onChunk: (chunk) {
+      fullContent += chunk;
       final msgIndex = _currentConversation!.messages.indexWhere((m) => m.id == aiMessage.id);
       if (msgIndex != -1) {
         _currentConversation!.messages[msgIndex] = Message(
           id: aiMessage.id,
           role: MessageRole.assistant,
-          content: _streamingContent,
+          content: fullContent,
           timestamp: aiMessage.timestamp,
-          status: MessageStatus.sent,
-          tokenUsage: TokenUsage(
-            promptTokens: 0,
-            completionTokens: _streamingContent.length ~/ 4,
-            totalTokens: _streamingContent.length ~/ 4,
-            duration: stopwatch.elapsedMilliseconds / 1000,
-          ),
+          status: MessageStatus.sending,
         );
+        setState(() {});
+        _scrollToBottom();
       }
+    },
+  );
 
-      await ConversationService.instance.update(_currentConversation!);
-      setState(() {});
-      _scrollToBottom();
+  stopwatch.stop();
 
-      // 检查是否申请子界面
-      await _checkAndNavigateToSub(_streamingContent);
+  final msgIndex = _currentConversation!.messages.indexWhere((m) => m.id == aiMessage.id);
+  if (msgIndex != -1) {
+    _currentConversation!.messages[msgIndex] = Message(
+      id: aiMessage.id,
+      role: MessageRole.assistant,
+      content: result.content,
+      timestamp: aiMessage.timestamp,
+      status: MessageStatus.sent,
+      tokenUsage: TokenUsage(
+        promptTokens: result.estimatedPromptTokens,
+        completionTokens: result.estimatedCompletionTokens,
+        totalTokens: result.estimatedPromptTokens + result.estimatedCompletionTokens,
+        duration: stopwatch.elapsedMilliseconds / 1000,
+      ),
+    );
+  }
+
+  await ConversationService.instance.update(_currentConversation!);
+  setState(() {});
+  _scrollToBottom();
+
+  await _checkAndNavigateToSub(result.content);
+        
 
     } catch (e) {
       final msgIndex = _currentConversation!.messages.indexWhere((m) => m.id == aiMessage.id);
