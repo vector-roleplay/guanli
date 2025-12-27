@@ -425,102 +425,101 @@ List<String> _splitContentByTokens(String content, int maxTokens) {
   }
 
   Future<void> _sendMessage(String text, List<FileAttachment> attachments) async {
-    if (text.isEmpty && attachments.isEmpty) return;
+  if (text.isEmpty && attachments.isEmpty) return;
 
-    final userMessage = Message(
-      role: MessageRole.user,
-      content: text,
-      attachments: attachments,
-      status: MessageStatus.sent,
-    );
-    _subConversation.messages.add(userMessage);
-    await SubConversationService.instance.update(_subConversation);
-    setState(() {});
-    _scrollToBottom();
+  final userMessage = Message(
+    role: MessageRole.user,
+    content: text,
+    attachments: attachments,
+    status: MessageStatus.sent,
+  );
+  _subConversation.messages.add(userMessage);
+  await SubConversationService.instance.update(_subConversation);
+  setState(() {});
+  _scrollToBottom();
 
-    final aiMessage = Message(
-      role: MessageRole.assistant,
-      content: '',
-      status: MessageStatus.sending,
-    );
-    _subConversation.messages.add(aiMessage);
-    setState(() {
-      _isLoading = true;
-      _streamingContent = '';
-    });
-    _scrollToBottom();
+  final aiMessage = Message(
+    role: MessageRole.assistant,
+    content: '',
+    status: MessageStatus.sending,
+  );
+  _subConversation.messages.add(aiMessage);
+  setState(() {
+    _isLoading = true;
+  });
+  _scrollToBottom();
 
-    final stopwatch = Stopwatch()..start();
+  final stopwatch = Stopwatch()..start();
 
-    try {
-      final stream = ApiService.streamToSubAI(
-        messages: _subConversation.messages
-            .where((m) => m.status != MessageStatus.sending)
-            .toList(),
-        directoryTree: widget.directoryTree,
-        level: _subConversation.level,
-      );
-
-      await for (var chunk in stream) {
-        _streamingContent += chunk;
+  try {
+    String fullResponseContent = '';
+    
+    final result = await ApiService.streamToSubAIWithTokens(
+      messages: _subConversation.messages
+          .where((m) => m.status != MessageStatus.sending)
+          .toList(),
+      directoryTree: widget.directoryTree,
+      level: _subConversation.level,
+      onChunk: (chunk) {
+        fullResponseContent += chunk;
         final msgIndex = _subConversation.messages.indexWhere((m) => m.id == aiMessage.id);
         if (msgIndex != -1) {
           _subConversation.messages[msgIndex] = Message(
             id: aiMessage.id,
             role: MessageRole.assistant,
-            content: _streamingContent,
+            content: fullResponseContent,
             timestamp: aiMessage.timestamp,
             status: MessageStatus.sending,
           );
           setState(() {});
           _scrollToBottom();
         }
-      }
+      },
+    );
 
-      stopwatch.stop();
+    stopwatch.stop();
 
-      final msgIndex = _subConversation.messages.indexWhere((m) => m.id == aiMessage.id);
-      if (msgIndex != -1) {
-        _subConversation.messages[msgIndex] = Message(
-          id: aiMessage.id,
-          role: MessageRole.assistant,
-          content: _streamingContent,
-          timestamp: aiMessage.timestamp,
-          status: MessageStatus.sent,
-          tokenUsage: TokenUsage(
-            promptTokens: 0,
-            completionTokens: _streamingContent.length ~/ 4,
-            totalTokens: _streamingContent.length ~/ 4,
-            duration: stopwatch.elapsedMilliseconds / 1000,
-          ),
-        );
-      }
-
-      await SubConversationService.instance.update(_subConversation);
-      setState(() {});
-      _scrollToBottom();
-
-      await _handleAIResponse(_streamingContent);
-
-    } catch (e) {
-      final msgIndex = _subConversation.messages.indexWhere((m) => m.id == aiMessage.id);
-      if (msgIndex != -1) {
-        _subConversation.messages[msgIndex] = Message(
-          id: aiMessage.id,
-          role: MessageRole.assistant,
-          content: '发送失败: $e',
-          timestamp: aiMessage.timestamp,
-          status: MessageStatus.error,
-        );
-      }
-      await SubConversationService.instance.update(_subConversation);
-      setState(() {});
-    } finally {
-      setState(() {
-        _isLoading = false;
-        _streamingContent = '';
-      });
+    final msgIndex = _subConversation.messages.indexWhere((m) => m.id == aiMessage.id);
+    if (msgIndex != -1) {
+      _subConversation.messages[msgIndex] = Message(
+        id: aiMessage.id,
+        role: MessageRole.assistant,
+        content: result.content,
+        timestamp: aiMessage.timestamp,
+        status: MessageStatus.sent,
+        tokenUsage: TokenUsage(
+          promptTokens: result.estimatedPromptTokens,
+          completionTokens: result.estimatedCompletionTokens,
+          totalTokens: result.estimatedPromptTokens + result.estimatedCompletionTokens,
+          duration: stopwatch.elapsedMilliseconds / 1000,
+        ),
+      );
     }
+
+    await SubConversationService.instance.update(_subConversation);
+    setState(() {});
+    _scrollToBottom();
+
+    await _handleAIResponse(result.content);
+
+  } catch (e) {
+    final msgIndex = _subConversation.messages.indexWhere((m) => m.id == aiMessage.id);
+    if (msgIndex != -1) {
+      _subConversation.messages[msgIndex] = Message(
+        id: aiMessage.id,
+        role: MessageRole.assistant,
+        content: '发送失败: $e',
+        timestamp: aiMessage.timestamp,
+        status: MessageStatus.error,
+      );
+    }
+    await SubConversationService.instance.update(_subConversation);
+    setState(() {});
+  } finally {
+    setState(() {
+      _isLoading = false;
+    });
+  }
   }
 
   Future<void> _deleteMessage(int index) async {
