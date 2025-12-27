@@ -61,10 +61,11 @@ class ApiService {
     );
   }
 
-  // 流式发送到子界面AI
+  // 流式发送到子界面AI（支持多级）
   static Stream<String> streamToSubAI({
     required List<Message> messages,
     required String directoryTree,
+    required int level,
   }) {
     final config = AppConfig.instance;
     return _streamRequest(
@@ -72,7 +73,7 @@ class ApiService {
       apiKey: config.subApiKey,
       model: config.subModel,
       messages: messages,
-      systemPrompt: config.subPrompt,
+      systemPrompt: config.getSubPrompt(level),
       directoryTree: directoryTree,
     );
   }
@@ -89,6 +90,7 @@ class ApiService {
 
     List<Map<String, dynamic>> apiMessages = [];
 
+    // 系统消息
     if (systemPrompt.isNotEmpty || directoryTree.isNotEmpty) {
       String systemContent = '';
       if (directoryTree.isNotEmpty) {
@@ -103,6 +105,7 @@ class ApiService {
       });
     }
 
+    // 对话消息
     for (var msg in messages) {
       apiMessages.add(msg.toApiFormat());
     }
@@ -120,7 +123,8 @@ class ApiService {
     final response = await http.Client().send(request);
 
     if (response.statusCode != 200) {
-      throw Exception('API请求失败: ${response.statusCode}');
+      final body = await response.stream.bytesToString();
+      throw Exception('API请求失败: ${response.statusCode} - $body');
     }
 
     await for (var chunk in response.stream.transform(utf8.decoder)) {
@@ -150,7 +154,7 @@ class ApiService {
     }
   }
 
-  // 非流式发送（保留作为备用）
+  // 非流式发送（备用）
   static Future<ApiResponse> sendToMainAI({
     required List<Message> messages,
     required String directoryTree,
@@ -162,13 +166,14 @@ class ApiService {
       model: config.mainModel,
       messages: messages,
       systemPrompt: config.mainPrompt,
-      directoryTree: directoryTree,
+            directoryTree: directoryTree,
     );
   }
 
   static Future<ApiResponse> sendToSubAI({
     required List<Message> messages,
     required String directoryTree,
+    required int level,
   }) async {
     final config = AppConfig.instance;
     return _sendRequest(
@@ -176,7 +181,7 @@ class ApiService {
       apiKey: config.subApiKey,
       model: config.subModel,
       messages: messages,
-      systemPrompt: config.subPrompt,
+      systemPrompt: config.getSubPrompt(level),
       directoryTree: directoryTree,
     );
   }
