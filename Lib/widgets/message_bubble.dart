@@ -3,11 +3,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../models/message.dart';
+import 'file_attachment_view.dart';
 
 class MessageBubble extends StatefulWidget {
   final Message message;
   final VoidCallback? onRetry;
-  final VoidCallback? onDelete;  // 新增删除回调
+  final VoidCallback? onDelete;
 
   const MessageBubble({
     super.key,
@@ -23,7 +24,7 @@ class MessageBubble extends StatefulWidget {
 class _MessageBubbleState extends State<MessageBubble> {
   bool _thinkingExpanded = false;
 
-  @override
+    @override
   Widget build(BuildContext context) {
     final isUser = widget.message.role == MessageRole.user;
     final colorScheme = Theme.of(context).colorScheme;
@@ -64,12 +65,28 @@ class _MessageBubbleState extends State<MessageBubble> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    // 普通附件
                     if (widget.message.attachments.isNotEmpty) ...[
                       _buildAttachments(context),
                       const SizedBox(height: 8),
                     ],
+                    // 消息内容
                     if (widget.message.content.isNotEmpty)
                       _buildContent(context),
+                    // 内嵌文件（折叠展示）
+                    if (widget.message.embeddedFiles.isNotEmpty) ...[
+                      const SizedBox(height: 12),
+                      FileAttachmentView(
+                        files: widget.message.embeddedFiles
+                            .map((f) => FileAttachmentData(
+                                  path: f.path,
+                                  content: f.content,
+                                  size: f.size,
+                                ))
+                            .toList(),
+                      ),
+                    ],
+                    // 发送中状态
                     if (widget.message.status == MessageStatus.sending)
                       Padding(
                         padding: const EdgeInsets.only(top: 8),
@@ -82,6 +99,7 @@ class _MessageBubbleState extends State<MessageBubble> {
                           ),
                         ),
                       ),
+                    // 错误状态
                     if (widget.message.status == MessageStatus.error)
                       _buildError(context),
                   ],
@@ -114,6 +132,7 @@ class _MessageBubbleState extends State<MessageBubble> {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // 思维链折叠
           GestureDetector(
             onTap: () => setState(() => _thinkingExpanded = !_thinkingExpanded),
             child: Container(
@@ -297,7 +316,7 @@ class _MessageBubbleState extends State<MessageBubble> {
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(_getFileIcon(attachment.mimeType), size: 18, color: Theme.of(context).colorScheme.primary),
+              Icon(Icons.insert_drive_file, size: 18, color: Theme.of(context).colorScheme.primary),
               const SizedBox(width: 6),
               Text(attachment.name, style: const TextStyle(fontSize: 13)),
             ],
@@ -361,16 +380,6 @@ class _MessageBubbleState extends State<MessageBubble> {
         ],
       ),
     );
-  }
-
-  IconData _getFileIcon(String mimeType) {
-    if (mimeType.startsWith('image/')) return Icons.image;
-    if (mimeType.startsWith('video/')) return Icons.video_file;
-    if (mimeType.startsWith('audio/')) return Icons.audio_file;
-    if (mimeType.contains('pdf')) return Icons.picture_as_pdf;
-    if (mimeType.contains('word') || mimeType.contains('document')) return Icons.description;
-    if (mimeType.contains('sheet') || mimeType.contains('excel')) return Icons.table_chart;
-    return Icons.insert_drive_file;
   }
 
   String _formatTime(DateTime time) {
