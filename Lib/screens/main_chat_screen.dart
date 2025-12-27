@@ -8,6 +8,7 @@ import '../services/api_service.dart';
 import '../services/database_service.dart';
 import '../services/conversation_service.dart';
 import '../services/sub_conversation_service.dart';
+import '../services/file_service.dart';
 import '../widgets/message_bubble.dart';
 import '../widgets/chat_input.dart';
 import '../utils/message_detector.dart';
@@ -24,6 +25,7 @@ class MainChatScreen extends StatefulWidget {
 class _MainChatScreenState extends State<MainChatScreen> {
   final ScrollController _scrollController = ScrollController();
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
+  final MessageDetector _detector = MessageDetector();
   
   String _directoryTree = '';
   Conversation? _currentConversation;
@@ -171,6 +173,7 @@ class _MainChatScreenState extends State<MainChatScreen> {
       setState(() {});
       _scrollToBottom();
 
+      // 检查是否申请子界面
       await _checkAndNavigateToSub(_streamingContent);
 
     } catch (e) {
@@ -195,48 +198,56 @@ class _MainChatScreenState extends State<MainChatScreen> {
   }
 
   Future<void> _checkAndNavigateToSub(String response) async {
-    final detector = MessageDetector();
+    // 检测【申请一级子界面】
+    final requestedLevel = _detector.detectSubLevelRequest(response);
     
-    if (detector.hasRequestDoc(response)) {
-      final paths = detector.extractPaths(response);
+    if (requestedLevel == 1 && _currentConversation != null) {
+      final paths = _detector.extractPaths(response);
       
-      if (paths.isNotEmpty && _currentConversation != null) {
-        // 创建子会话
-        final subConv = await SubConversationService.instance.create(
-          _currentConversation!.id,
-          '文件处理: ${paths.first.split('/').last}',
-        );
+      // 创建一级子会话
+      final subConv = await SubConversationService.instance.create(
+        parentId: _currentConversation!.id,
+        rootConversationId: _currentConversation!.id,
+        level: 1,
+      );
 
-        final result = await Navigator.push<Map<String, dynamic>>(
-          context,
-          MaterialPageRoute(
-            builder: (context) => SubChatScreen(
-              subConversation: subConv,
-              initialMessage: response,
-              requestedPaths: paths,
-              directoryTree: _directoryTree,
-            ),
+      final result = await Navigator.push<Map<String, dynamic>>(
+        context,
+        MaterialPageRoute(
+          builder: (context) => SubChatScreen(
+            subConversation: subConv,
+            initialMessage: response,
+            requestedPaths: paths,
+            directoryTree: _directoryTree,
           ),
-        );
+        ),
+      );
 
-        // 处理返回结果
-        if (result != null) {
-          if (result['completed'] == true) {
-            // 系统自动退出，标记为已完成
-            await SubConversationService.instance.markCompleted(subConv.id);
-          }
-          if (result['message'] != null && result['message'].isNotEmpty) {
-            await _sendMessage(result['message'], []);
-          }
-        }
-        // 如果result为null（用户手动返回），子会话保持未完成状态
+      // 处理返回
+      if (result != null && result['message'] != null && result['message'].isNotEmpty) {
+        await _handleReturnMessage(result['message']);
       }
+      
+      setState(() {});
     }
+  }
+
+  Future<void> _handleReturnMessage(String message) async {
+    // 作为AI消息添加到主界面
+    final returnMessage = Message(
+      role: MessageRole.assistant,
+      content: '【来自子界面的返回】\n$message',
+      status: MessageStatus.sent,
+    );
+    _currentConversation!.messages.add(returnMessage);
+    await ConversationService.instance.update(_currentConversation!);
+    setState(() {});
+    _scrollToBottom();
   }
 
   // 进入已存在的子会话
   Future<void> _enterSubConversation(SubConversation subConv) async {
-    Navigator.pop(context); // 关闭抽屉
+    Navigator.pop(context);
     
     final result = await Navigator.push<Map<String, dynamic>>(
       context,
@@ -246,17 +257,15 @@ class _MainChatScreenState extends State<MainChatScreen> {
           initialMessage: '',
           requestedPaths: [],
           directoryTree: _directoryTree,
-          isResuming: true,  // 标记为恢复会话
+          isResuming: true,
         ),
       ),
     );
 
-    if (result != null) {
-      if (result['completed'] == true) {
-        await SubConversationService.instance.markCompleted(subConv.id);
-      }
-      if (result['message'] != null && result['message'].isNotEmpty) {
-        await _sendMessage(result['message'], []);
+    if (result != null && result['message'] != null && result['message'].isNotEmpty) {
+      // 只有一级子界面返回的消息才发送给主界面
+      if (subConv.level == 1) {
+        await _handleReturnMessage(result['message']);
       }
     }
     setState(() {});
@@ -294,8 +303,7 @@ class _MainChatScreenState extends State<MainChatScreen> {
           TextButton(onPressed: () => Navigator.pop(context), child: const Text('取消')),
           TextButton(
             onPressed: () async {
-              // 同时删除子会话
-              await SubConversationService.instance.deleteByParentId(conversation.id);
+              await SubConversationService.instance.deleteByRootId(conversation.id);
               await ConversationService.instance.delete(conversation.id);
               Navigator.pop(context);
               
@@ -417,10 +425,10 @@ class _MainChatScreenState extends State<MainChatScreen> {
     final colorScheme = Theme.of(context).colorScheme;
     final conversations = ConversationService.instance.conversations;
     
-    // 获取当前会话的未完成子会话
-    List<SubConversation> subConvs = [];
+    // 获取当前会话的所有子会话
+    List<SubConversation> allSubConvs = [];
     if (_currentConversation != null) {
-      subConvs = SubConversationService.instance.getByParentId(_currentConversation!.id);
+      allSubConvs = SubConversationService.instance.getByRootId(_currentConversation!.id);
     }
 
     return Drawer(
@@ -450,13 +458,13 @@ class _MainChatScreenState extends State<MainChatScreen> {
             ),
             const Divider(height: 1),
 
-            // 未完成的子会话
-            if (subConvs.isNotEmpty) ...[
+            // 当前会话的子界面列表
+            if (allSubConvs.isNotEmpty) ...[
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                 alignment: Alignment.centerLeft,
                 child: Text(
-                  '未完成的子会话',
+                  '子界面 (${allSubConvs.length}个)',
                   style: TextStyle(
                     fontSize: 12,
                     color: colorScheme.primary,
@@ -464,15 +472,44 @@ class _MainChatScreenState extends State<MainChatScreen> {
                   ),
                 ),
               ),
-              ...subConvs.map((sub) => ListTile(
-                leading: Icon(Icons.subdirectory_arrow_right, color: colorScheme.secondary),
-                title: Text(sub.title, maxLines: 1, overflow: TextOverflow.ellipsis),
-                subtitle: Text('${sub.messages.length} 条消息', style: TextStyle(fontSize: 12, color: colorScheme.outline)),
+              ...allSubConvs.map((sub) => ListTile(
+                leading: Icon(
+                  Icons.subdirectory_arrow_right,
+                  color: colorScheme.secondary,
+                ),
+                title: Text(
+                  sub.title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                subtitle: Text(
+                  '${sub.levelName} · ${sub.messages.length}条消息',
+                  style: TextStyle(fontSize: 12, color: colorScheme.outline),
+                ),
                 trailing: IconButton(
                   icon: Icon(Icons.delete_outline, size: 20, color: colorScheme.error),
                   onPressed: () async {
-                    await SubConversationService.instance.delete(sub.id);
-                    setState(() {});
+                    final confirm = await showDialog<bool>(
+                      context: context,
+                      builder: (context) => AlertDialog(
+                        title: const Text('删除子界面'),
+                        content: Text('确定要删除「${sub.title}」吗？'),
+                        actions: [
+                          TextButton(
+                            onPressed: () => Navigator.pop(context, false),
+                            child: const Text('取消'),
+                          ),
+                          TextButton(
+                            onPressed: () => Navigator.pop(context, true),
+                            child: Text('删除', style: TextStyle(color: colorScheme.error)),
+                          ),
+                        ],
+                      ),
+                    );
+                    if (confirm == true) {
+                      await SubConversationService.instance.delete(sub.id);
+                      setState(() {});
+                    }
                   },
                 ),
                 onTap: () => _enterSubConversation(sub),
@@ -487,7 +524,7 @@ class _MainChatScreenState extends State<MainChatScreen> {
                 itemBuilder: (context, index) {
                   final conv = conversations[index];
                   final isSelected = conv.id == _currentConversation?.id;
-                  final hasSubConvs = SubConversationService.instance.getByParentId(conv.id).isNotEmpty;
+                  final subCount = SubConversationService.instance.getByRootId(conv.id).length;
 
                   return ListTile(
                     selected: isSelected,
@@ -498,16 +535,19 @@ class _MainChatScreenState extends State<MainChatScreen> {
                           Icons.chat_bubble_outline,
                           color: isSelected ? colorScheme.primary : colorScheme.outline,
                         ),
-                        if (hasSubConvs)
+                        if (subCount > 0)
                           Positioned(
                             right: 0,
                             top: 0,
                             child: Container(
-                              width: 8,
-                              height: 8,
+                              padding: const EdgeInsets.all(2),
                               decoration: BoxDecoration(
                                 color: colorScheme.secondary,
                                 shape: BoxShape.circle,
+                              ),
+                              child: Text(
+                                '$subCount',
+                                style: const TextStyle(fontSize: 8, color: Colors.white),
                               ),
                             ),
                           ),
