@@ -257,6 +257,25 @@ List<String> _splitContentByTokens(String content, int maxTokens) {
 
   return chunks;
 }
+  // 等待AI回复【请继续】
+Future<void> _waitForContinue() async {
+  int attempts = 0;
+  while (attempts < 120) {
+    await Future.delayed(const Duration(milliseconds: 500));
+    attempts++;
+    
+    if (_subConversation.messages.isNotEmpty) {
+      final lastMessage = _subConversation.messages.last;
+      if (lastMessage.role == MessageRole.assistant && 
+          lastMessage.status == MessageStatus.sent) {
+        if (lastMessage.content.contains('【请继续】')) {
+          break;
+        }
+        break;
+      }
+    }
+  }
+}
 
   Future<void> _sendSystemMessage({
   required String displayContent,
