@@ -22,13 +22,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
   late TextEditingController _subApiUrlController;
   late TextEditingController _subApiKeyController;
   late TextEditingController _subModelController;
-  late TextEditingController _subPromptController;
+
+  // 多级子界面提示词控制器
+  List<TextEditingController> _subPromptControllers = [];
+  int _currentSubLevel = 1;
 
   String _directoryTree = '';
   bool _isLoading = false;
-  
-  List<String> _mainModels = [];
-  List<String> _subModels = [];
   bool _loadingMainModels = false;
   bool _loadingSubModels = false;
 
@@ -45,9 +45,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _subApiUrlController = TextEditingController(text: config.subApiUrl);
     _subApiKeyController = TextEditingController(text: config.subApiKey);
     _subModelController = TextEditingController(text: config.subModel);
-    _subPromptController = TextEditingController(text: config.subPrompt);
+
+    // 初始化多级提示词控制器
+    _initSubPromptControllers();
 
     _loadDirectoryTree();
+  }
+
+  void _initSubPromptControllers() {
+    final config = AppConfig.instance;
+    _subPromptControllers = [];
+    for (int i = 0; i < config.subPromptLevels; i++) {
+      _subPromptControllers.add(TextEditingController(text: config.subPrompts[i]));
+    }
   }
 
   @override
@@ -59,7 +69,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _subApiUrlController.dispose();
     _subApiKeyController.dispose();
     _subModelController.dispose();
-    _subPromptController.dispose();
+    for (var controller in _subPromptControllers) {
+      controller.dispose();
+    }
     super.dispose();
   }
 
@@ -83,10 +95,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
     try {
       final models = await ApiService.getModels(url, key);
-      setState(() {
-        _mainModels = models;
-        _loadingMainModels = false;
-      });
+      setState(() => _loadingMainModels = false);
       
       if (models.isNotEmpty) {
         _showModelPicker(models, _mainModelController);
@@ -116,10 +125,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
     try {
       final models = await ApiService.getModels(url, key);
-      setState(() {
-        _subModels = models;
-        _loadingSubModels = false;
-      });
+      setState(() => _loadingSubModels = false);
       
       if (models.isNotEmpty) {
         _showModelPicker(models, _subModelController);
@@ -149,10 +155,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               padding: const EdgeInsets.all(16),
               child: Text(
                 '选择模型 (${models.length}个)',
-                style: const TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                ),
+                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
               ),
             ),
             Expanded(
@@ -197,14 +200,24 @@ class _SettingsScreenState extends State<SettingsScreen> {
       model: _subModelController.text.trim(),
     );
 
-    config.updatePrompts(
-      main: _mainPromptController.text.trim(),
-      sub: _subPromptController.text.trim(),
-    );
+    config.updateMainPrompt(_mainPromptController.text.trim());
+
+    // 保存所有级别的提示词
+    for (int i = 0; i < _subPromptControllers.length; i++) {
+      config.setSubPrompt(i + 1, _subPromptControllers[i].text.trim());
+    }
 
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('设置已保存'), duration: Duration(seconds: 1)),
     );
+  }
+
+  void _addSubPromptLevel() {
+    setState(() {
+      _subPromptControllers.add(TextEditingController());
+      _currentSubLevel = _subPromptControllers.length;
+    });
+    AppConfig.instance.addSubPromptLevel();
   }
 
   Future<void> _importFiles() async {
@@ -234,31 +247,31 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _importDirectory() async {
-  final result = await FilePicker.platform.getDirectoryPath();
+    final result = await FilePicker.platform.getDirectoryPath();
 
-  if (result != null) {
-    setState(() => _isLoading = true);
+    if (result != null) {
+      setState(() => _isLoading = true);
 
-    try {
-      final count = await DatabaseService.instance.importDirectory(result);
-      await _loadDirectoryTree();
+      try {
+        final count = await DatabaseService.instance.importDirectory(result);
+        await _loadDirectoryTree();
 
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('导入完成，共 $count 个文件')),
-        );
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('导入完成，共 $count 个文件')),
+          );
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('导入失败: $e')),
+          );
+        }
+      } finally {
+        setState(() => _isLoading = false);
       }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('导入失败: $e')),
-        );
-      }
-    } finally {
-      setState(() => _isLoading = false);
     }
   }
-}
 
   Future<void> _clearDatabase() async {
     final confirm = await showDialog<bool>(
@@ -273,10 +286,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
           TextButton(
             onPressed: () => Navigator.pop(context, true),
-            child: Text(
-              '清空',
-              style: TextStyle(color: Theme.of(context).colorScheme.error),
-            ),
+            child: Text('清空', style: TextStyle(color: Theme.of(context).colorScheme.error)),
           ),
         ],
       ),
@@ -292,6 +302,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
         );
       }
     }
+  }
+
+  String _getLevelName(int level) {
+    const chineseNums = ['一', '二', '三', '四', '五', '六', '七', '八', '九', '十'];
+    if (level >= 1 && level <= 10) {
+      return '${chineseNums[level - 1]}级';
+    }
+    return '$level级';
   }
 
   @override
@@ -345,11 +363,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       ElevatedButton(
                         onPressed: _loadingMainModels ? null : _fetchMainModels,
                         child: _loadingMainModels
-                            ? const SizedBox(
-                                width: 20,
-                                height: 20,
-                                child: CircularProgressIndicator(strokeWidth: 2),
-                              )
+                            ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
                             : const Text('获取'),
                       ),
                     ],
@@ -393,22 +407,66 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       ElevatedButton(
                         onPressed: _loadingSubModels ? null : _fetchSubModels,
                         child: _loadingSubModels
-                            ? const SizedBox(
-                                width: 20,
-                                height: 20,
-                                child: CircularProgressIndicator(strokeWidth: 2),
-                              )
+                            ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
                             : const Text('获取'),
                       ),
                     ],
                   ),
+
+                  const SizedBox(height: 24),
+
+                  // 多级子界面提示词
+                  _buildSectionTitle('子界面提示词设置', Icons.layers),
                   const SizedBox(height: 12),
-                  _buildTextField(
-                    controller: _subPromptController,
-                    label: '子界面提示词',
-                    hint: '输入子界面的系统提示词...',
-                    maxLines: 4,
+                  
+                  // 级别选择器
+                  Container(
+                    height: 50,
+                    child: ListView.builder(
+                      scrollDirection: Axis.horizontal,
+                      itemCount: _subPromptControllers.length + 1,
+                      itemBuilder: (context, index) {
+                        if (index == _subPromptControllers.length) {
+                          // 添加按钮
+                          return Padding(
+                            padding: const EdgeInsets.only(right: 8),
+                            child: ActionChip(
+                              avatar: const Icon(Icons.add, size: 18),
+                              label: const Text('添加'),
+                              onPressed: _addSubPromptLevel,
+                            ),
+                          );
+                        }
+                        
+                        final level = index + 1;
+                        final isSelected = _currentSubLevel == level;
+                        
+                        return Padding(
+                          padding: const EdgeInsets.only(right: 8),
+                          child: ChoiceChip(
+                            label: Text(_getLevelName(level)),
+                            selected: isSelected,
+                            onSelected: (selected) {
+                              if (selected) {
+                                setState(() => _currentSubLevel = level);
+                              }
+                            },
+                          ),
+                        );
+                      },
+                    ),
                   ),
+                  
+                  const SizedBox(height: 12),
+                  
+                  // 当前级别的提示词输入框
+                  if (_currentSubLevel > 0 && _currentSubLevel <= _subPromptControllers.length)
+                    _buildTextField(
+                      controller: _subPromptControllers[_currentSubLevel - 1],
+                      label: '${_getLevelName(_currentSubLevel)}子界面提示词',
+                      hint: '输入${_getLevelName(_currentSubLevel)}子界面的系统提示词...',
+                      maxLines: 4,
+                    ),
 
                   const SizedBox(height: 32),
 
@@ -451,32 +509,35 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
                   Container(
                     width: double.infinity,
+                    constraints: const BoxConstraints(maxHeight: 300),
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
                       color: colorScheme.surfaceContainerHighest.withOpacity(0.5),
                       borderRadius: BorderRadius.circular(8),
                       border: Border.all(color: colorScheme.outline.withOpacity(0.3)),
                     ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          '当前文件目录:',
-                          style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            color: colorScheme.primary,
+                    child: SingleChildScrollView(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            '当前文件目录:',
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              color: colorScheme.primary,
+                            ),
                           ),
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          _directoryTree.isEmpty ? '(暂无文件)' : _directoryTree,
-                          style: TextStyle(
-                            fontFamily: 'monospace',
-                            fontSize: 13,
-                            color: colorScheme.onSurfaceVariant,
+                          const SizedBox(height: 8),
+                          Text(
+                            _directoryTree.isEmpty ? '(暂无文件)' : _directoryTree,
+                            style: TextStyle(
+                              fontFamily: 'monospace',
+                              fontSize: 13,
+                              color: colorScheme.onSurfaceVariant,
+                            ),
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
                   ),
 
@@ -492,13 +553,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       children: [
         Icon(icon, size: 22, color: Theme.of(context).colorScheme.primary),
         const SizedBox(width: 8),
-        Text(
-          title,
-          style: const TextStyle(
-            fontSize: 18,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
+        Text(title, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
       ],
     );
   }
