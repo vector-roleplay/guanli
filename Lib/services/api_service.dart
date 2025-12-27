@@ -20,7 +20,27 @@ class ApiResponse {
   });
 }
 
+// 流式响应结果
+class StreamResult {
+  final String content;
+  final int estimatedPromptTokens;
+  final int estimatedCompletionTokens;
+
+  StreamResult({
+    required this.content,
+    required this.estimatedPromptTokens,
+    required this.estimatedCompletionTokens,
+  });
+}
+
 class ApiService {
+  // 估算token数（1 token ≈ 4字符，中文约2字符）
+  static int estimateTokens(String text) {
+    // 简单估算：英文约4字符/token，中文约2字符/token
+    // 取平均值约3字符/token
+    return (text.length / 3).ceil();
+  }
+
   // 获取模型列表
   static Future<List<String>> getModels(String apiUrl, String apiKey) async {
     try {
@@ -45,7 +65,142 @@ class ApiService {
     }
   }
 
-  // 流式发送到主界面AI
+  // 流式发送到主界面AI，返回估算的token
+  static Future<StreamResult> streamToMainAIWithTokens({
+    required List<Message> messages,
+    required String directoryTree,
+    required Function(String) onChunk,
+  }) async {
+    final config = AppConfig.instance;
+    return _streamRequestWithTokens(
+      apiUrl: config.mainApiUrl,
+      apiKey: config.mainApiKey,
+      model: config.mainModel,
+      messages: messages,
+      systemPrompt: config.mainPrompt,
+      directoryTree: directoryTree,
+      onChunk: onChunk,
+    );
+  }
+
+  // 流式发送到子界面AI，返回估算的token
+  static Future<StreamResult> streamToSubAIWithTokens({
+    required List<Message> messages,
+    required String directoryTree,
+    required int level,
+    required Function(String) onChunk,
+  }) async {
+    final config = AppConfig.instance;
+    return _streamRequestWithTokens(
+      apiUrl: config.subApiUrl,
+      apiKey: config.subApiKey,
+      model: config.subModel,
+      messages: messages,
+      systemPrompt: config.getSubPrompt(level),
+      directoryTree: directoryTree,
+      onChunk: onChunk,
+    );
+  }
+
+  static Future<StreamResult> _streamRequestWithTokens({
+    required String apiUrl,
+    required String apiKey,
+    required String model,
+    required List<Message> messages,
+    required String systemPrompt,
+    required String directoryTree,
+    required Function(String) onChunk,
+  }) async {
+    final url = Uri.parse('$apiUrl/chat/completions');
+
+    List<Map<String, dynamic>> apiMessages = [];
+    int totalInputLength = 0;
+
+    // 系统消息
+    if (systemPrompt.isNotEmpty || directoryTree.isNotEmpty) {
+      String systemContent = '';
+      if (directoryTree.isNotEmpty) {
+        systemContent += '【文件目录】\n$directoryTree\n\n';
+      }
+      if (systemPrompt.isNotEmpty) {
+        systemContent += systemPrompt;
+      }
+      apiMessages.add({
+        'role': 'system',
+        'content': systemContent.trim(),
+      });
+      totalInputLength += systemContent.length;
+    }
+
+    // 对话消息
+    for (var msg in messages) {
+      final apiFormat = msg.toApiFormat();
+      apiMessages.add(apiFormat);
+      totalInputLength += (apiFormat['content'] as String).length;
+    }
+
+    // 估算输入token
+    final estimatedPromptTokens = estimateTokens(totalInputLength.toString()) > 0 
+        ? (totalInputLength / 3).ceil() 
+        : 0;
+
+    final request = http.Request('POST', url);
+    request.headers['Content-Type'] = 'application/json';
+    request.headers['Authorization'] = 'Bearer $apiKey';
+    request.body = jsonEncode({
+      'model': model,
+      'messages': apiMessages,
+      'max_tokens': 8192,
+      'stream': true,
+    });
+
+    final response = await http.Client().send(request);
+
+    if (response.statusCode != 200) {
+      final body = await response.stream.bytesToString();
+      throw Exception('API请求失败: ${response.statusCode} - $body');
+    }
+
+    StringBuffer fullContent = StringBuffer();
+
+    await for (var chunk in response.stream.transform(utf8.decoder)) {
+      final lines = chunk.split('\n');
+      for (var line in lines) {
+        if (line.startsWith('data: ')) {
+          final data = line.substring(6).trim();
+          if (data == '[DONE]') {
+            break;
+          }
+          if (data.isNotEmpty) {
+            try {
+              final json = jsonDecode(data);
+              final delta = json['choices']?[0]?['delta'];
+              if (delta != null) {
+                final content = delta['content'];
+                if (content != null && content.isNotEmpty) {
+                  fullContent.write(content);
+                  onChunk(content);
+                }
+              }
+            } catch (e) {
+              // 解析错误，跳过
+            }
+          }
+        }
+      }
+    }
+
+    final outputContent = fullContent.toString();
+    final estimatedCompletionTokens = estimateTokens(outputContent);
+
+    return StreamResult(
+      content: outputContent,
+      estimatedPromptTokens: (totalInputLength / 3).ceil(),
+      estimatedCompletionTokens: estimatedCompletionTokens,
+    );
+  }
+
+  // 保留原来的流式方法（兼容）
   static Stream<String> streamToMainAI({
     required List<Message> messages,
     required String directoryTree,
@@ -61,7 +216,6 @@ class ApiService {
     );
   }
 
-  // 流式发送到子界面AI（支持多级）
   static Stream<String> streamToSubAI({
     required List<Message> messages,
     required String directoryTree,
@@ -90,7 +244,6 @@ class ApiService {
 
     List<Map<String, dynamic>> apiMessages = [];
 
-    // 系统消息
     if (systemPrompt.isNotEmpty || directoryTree.isNotEmpty) {
       String systemContent = '';
       if (directoryTree.isNotEmpty) {
@@ -105,7 +258,6 @@ class ApiService {
       });
     }
 
-    // 对话消息
     for (var msg in messages) {
       apiMessages.add(msg.toApiFormat());
     }
@@ -145,16 +297,14 @@ class ApiService {
                   yield content;
                 }
               }
-            } catch (e) {
-              // 解析错误，跳过
-            }
+            } catch (e) {}
           }
         }
       }
     }
   }
 
-  // 非流式发送（备用）
+  // 非流式发送
   static Future<ApiResponse> sendToMainAI({
     required List<Message> messages,
     required String directoryTree,
@@ -166,7 +316,7 @@ class ApiService {
       model: config.mainModel,
       messages: messages,
       systemPrompt: config.mainPrompt,
-            directoryTree: directoryTree,
+      directoryTree: directoryTree,
     );
   }
 
