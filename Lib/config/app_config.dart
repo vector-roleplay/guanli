@@ -2,6 +2,7 @@
 
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'dart:convert';
 
 class AppConfig extends ChangeNotifier {
   static final AppConfig instance = AppConfig._internal();
@@ -12,14 +13,16 @@ class AppConfig extends ChangeNotifier {
   String mainApiKey = '';
   String mainModel = 'gpt-4';
   
-  // 子界面API配置
+  // 子界面API配置（所有级别共用）
   String subApiUrl = '';
   String subApiKey = '';
   String subModel = 'gpt-4';
   
-  // 提示词
-  String mainPrompt = '';      // 主界面提示词
-  String subPrompt = '';       // 子界面提示词
+  // 主界面提示词
+  String mainPrompt = '';
+  
+  // 多级子界面提示词 (索引0=一级, 1=二级, ...)
+  List<String> subPrompts = ['', '', '', '', ''];  // 预设5级
   
   // 文件大小限制 (bytes)
   static const int maxChunkSize = 900 * 1024; // 900KB
@@ -36,7 +39,21 @@ class AppConfig extends ChangeNotifier {
     subModel = prefs.getString('subModel') ?? 'gpt-4';
     
     mainPrompt = prefs.getString('mainPrompt') ?? '';
-    subPrompt = prefs.getString('subPrompt') ?? '';
+    
+    // 加载多级提示词
+    final subPromptsJson = prefs.getString('subPrompts');
+    if (subPromptsJson != null) {
+      try {
+        final list = jsonDecode(subPromptsJson) as List;
+        subPrompts = list.map((e) => e.toString()).toList();
+        // 确保至少5级
+        while (subPrompts.length < 5) {
+          subPrompts.add('');
+        }
+      } catch (e) {
+        subPrompts = ['', '', '', '', ''];
+      }
+    }
     
     notifyListeners();
   }
@@ -53,7 +70,7 @@ class AppConfig extends ChangeNotifier {
     await prefs.setString('subModel', subModel);
     
     await prefs.setString('mainPrompt', mainPrompt);
-    await prefs.setString('subPrompt', subPrompt);
+    await prefs.setString('subPrompts', jsonEncode(subPrompts));
     
     notifyListeners();
   }
@@ -72,9 +89,34 @@ class AppConfig extends ChangeNotifier {
     save();
   }
 
-  void updatePrompts({String? main, String? sub}) {
-    if (main != null) mainPrompt = main;
-    if (sub != null) subPrompt = sub;
+  void updateMainPrompt(String prompt) {
+    mainPrompt = prompt;
     save();
   }
+
+  // 获取某一级的提示词
+  String getSubPrompt(int level) {
+    if (level < 1 || level > subPrompts.length) return '';
+    return subPrompts[level - 1];
+  }
+
+  // 设置某一级的提示词
+  void setSubPrompt(int level, String prompt) {
+    if (level < 1) return;
+    // 自动扩展列表
+    while (subPrompts.length < level) {
+      subPrompts.add('');
+    }
+    subPrompts[level - 1] = prompt;
+    save();
+  }
+
+  // 添加新级别
+  void addSubPromptLevel() {
+    subPrompts.add('');
+    save();
+  }
+
+  // 获取总级别数
+  int get subPromptLevels => subPrompts.length;
 }
