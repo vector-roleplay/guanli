@@ -17,7 +17,7 @@ class SubChatScreen extends StatefulWidget {
   final String initialMessage;
   final List<String> requestedPaths;
   final String directoryTree;
-  final bool isResuming;  // 是否是恢复已有会话
+  final bool isResuming;
 
   const SubChatScreen({
     super.key,
@@ -45,9 +45,10 @@ class _SubChatScreenState extends State<SubChatScreen> {
     super.initState();
     _subConversation = widget.subConversation;
     
-    // 如果不是恢复会话，初始化发送文件
     if (!widget.isResuming && widget.requestedPaths.isNotEmpty) {
-      _initializeChat();
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _initializeChat();
+      });
     }
   }
 
@@ -74,109 +75,45 @@ class _SubChatScreenState extends State<SubChatScreen> {
   }
 
   Future<void> _sendFilesWithMessage(String message, List<String> paths) async {
+    // 获取文件内容
     final fileContents = await FileService.instance.getFilesContent(paths);
-    final totalSize = fileContents.fold<int>(0, (sum, f) => sum + f.size);
-
-    String content = '【请求说明书】\n$message\n\n【文件目录】\n${widget.directoryTree}';
-
-    if (fileContents.isEmpty) {
-      content += '\n\n【注意】未找到请求的文件内容';
-      await _sendSystemMessage(content);
-    } else if (totalSize <= AppConfig.maxChunkSize) {
-      content += '\n\n【文件内容】\n';
+    
+    // 构建显示内容（简短版）
+    String displayContent = '【申请${_subConversation.levelName}子界面】\n$message\n\n【文件目录】\n${widget.directoryTree}';
+    
+    // 构建完整内容（发送给API）
+    String fullContent = displayContent;
+    if (fileContents.isNotEmpty) {
+      fullContent += '\n\n【文件内容】\n';
       for (var file in fileContents) {
-        content += '--- ${file.path} ---\n${file.content}\n\n';
+        fullContent += '--- ${file.path} ---\n${file.content}\n\n';
       }
-      await _sendSystemMessage(content);
     } else {
-      await _sendFilesInChunks(content, fileContents);
+      fullContent += '\n\n【注意】未找到请求的文件';
     }
+
+    // 创建内嵌文件列表
+    List<EmbeddedFile> embeddedFiles = fileContents
+        .map((f) => EmbeddedFile(path: f.path, content: f.content, size: f.size))
+        .toList();
+
+    await _sendSystemMessage(
+      displayContent: displayContent,
+      fullContent: fullContent,
+      embeddedFiles: embeddedFiles,
+    );
   }
 
-  Future<void> _sendFilesInChunks(String baseContent, List<FileContent> files) async {
-    int sentSize = 0;
-    int totalSize = files.fold<int>(0, (sum, f) => sum + f.size);
-    List<FileContent> currentBatch = [];
-    int currentBatchSize = 0;
-
-    for (var file in files) {
-      if (file.size > AppConfig.maxChunkSize) {
-        await _sendLargeFile(baseContent, file, sentSize, totalSize);
-        sentSize += file.size;
-      } else if (currentBatchSize + file.size > AppConfig.maxChunkSize) {
-        await _sendBatch(baseContent, currentBatch, sentSize, totalSize);
-        sentSize += currentBatchSize;
-        currentBatch = [file];
-        currentBatchSize = file.size;
-      } else {
-        currentBatch.add(file);
-        currentBatchSize += file.size;
-      }
-    }
-
-    if (currentBatch.isNotEmpty) {
-      await _sendBatch(baseContent, currentBatch, sentSize, totalSize);
-    }
-  }
-
-  Future<void> _sendBatch(String baseContent, List<FileContent> batch, int sentSize, int totalSize) async {
-    int batchSize = batch.fold<int>(0, (sum, f) => sum + f.size);
-    int newSentSize = sentSize + batchSize;
-    int percentage = ((newSentSize / totalSize) * 100).round();
-
-    String content = '$baseContent\n\n【文件内容】\n';
-    for (var file in batch) {
-      content += '--- ${file.path} ---\n${file.content}\n\n';
-    }
-    content += '\n本次文件已发送$percentage%';
-
-    await _sendSystemMessage(content);
-
-    if (percentage < 100) {
-      await _waitForContinue();
-    }
-  }
-
-  Future<void> _sendLargeFile(String baseContent, FileContent file, int sentSize, int totalSize) async {
-    final chunks = FileService.instance.splitContent(file.content, AppConfig.maxChunkSize);
-    int chunksSent = 0;
-
-    for (var chunk in chunks) {
-      chunksSent++;
-      int overallPercentage = (((sentSize + (file.size * chunksSent / chunks.length)) / totalSize) * 100).round();
-
-      String content = '$baseContent\n\n【文件内容 - ${file.path} (第$chunksSent/${chunks.length}部分)】\n$chunk';
-      content += '\n\n本次文件已发送$overallPercentage%';
-
-      await _sendSystemMessage(content);
-
-      if (chunksSent < chunks.length) {
-        await _waitForContinue();
-      }
-    }
-  }
-
-  Future<void> _waitForContinue() async {
-    int attempts = 0;
-    while (attempts < 60) {  // 最多等30秒
-      await Future.delayed(const Duration(milliseconds: 500));
-      attempts++;
-      
-      if (_subConversation.messages.isNotEmpty) {
-        final lastMessage = _subConversation.messages.last;
-        if (lastMessage.role == MessageRole.assistant && 
-            lastMessage.status == MessageStatus.sent &&
-            lastMessage.content.contains('【请继续】')) {
-          break;
-        }
-      }
-    }
-  }
-
-  Future<void> _sendSystemMessage(String content) async {
+  Future<void> _sendSystemMessage({
+    required String displayContent,
+    required String fullContent,
+    List<EmbeddedFile>? embeddedFiles,
+  }) async {
     final systemMessage = Message(
       role: MessageRole.user,
-      content: content,
+      content: displayContent,
+      fullContent: fullContent,
+      embeddedFiles: embeddedFiles ?? [],
       status: MessageStatus.sent,
     );
     _subConversation.messages.add(systemMessage);
@@ -204,6 +141,7 @@ class _SubChatScreenState extends State<SubChatScreen> {
             .where((m) => m.status != MessageStatus.sending)
             .toList(),
         directoryTree: widget.directoryTree,
+        level: _subConversation.level,
       );
 
       await for (var chunk in stream) {
@@ -269,24 +207,68 @@ class _SubChatScreenState extends State<SubChatScreen> {
   }
 
   Future<void> _handleAIResponse(String response) async {
-    // 检测是否返回主界面
-    if (_detector.hasReturnToMain(response)) {
+    // 检测是否返回上一级
+    final returnLevel = _detector.detectReturnRequest(response);
+    if (returnLevel == _subConversation.level) {
+      // 返回上一级
       if (mounted) {
         Navigator.pop(context, {
-          'completed': true,
           'message': response,
         });
       }
       return;
     }
 
-    // 检测是否继续请求文件
-    if (_detector.hasRequestDoc(response)) {
+    // 检测是否申请下一级子界面
+    final requestedLevel = _detector.detectSubLevelRequest(response);
+    if (requestedLevel == _subConversation.level + 1) {
       final paths = _detector.extractPaths(response);
-      if (paths.isNotEmpty) {
-        await _sendFilesWithMessage(response, paths);
-      }
+      await _navigateToNextLevel(response, paths);
     }
+  }
+
+  Future<void> _navigateToNextLevel(String message, List<String> paths) async {
+    // 创建下一级子会话
+    final nextSubConv = await SubConversationService.instance.create(
+      parentId: _subConversation.id,
+      rootConversationId: _subConversation.rootConversationId,
+      level: _subConversation.level + 1,
+    );
+
+    final result = await Navigator.push<Map<String, dynamic>>(
+      context,
+      MaterialPageRoute(
+        builder: (context) => SubChatScreen(
+          subConversation: nextSubConv,
+          initialMessage: message,
+          requestedPaths: paths,
+          directoryTree: widget.directoryTree,
+        ),
+      ),
+    );
+
+    // 处理下级返回的消息
+    if (result != null && result['message'] != null && result['message'].isNotEmpty) {
+      await _handleReturnFromChild(result['message']);
+    }
+    
+    setState(() {});
+  }
+
+  Future<void> _handleReturnFromChild(String message) async {
+    // 作为AI消息添加
+    final returnMessage = Message(
+      role: MessageRole.assistant,
+      content: message,
+      status: MessageStatus.sent,
+    );
+    _subConversation.messages.add(returnMessage);
+    await SubConversationService.instance.update(_subConversation);
+    setState(() {});
+    _scrollToBottom();
+
+    // 继续检测这条消息
+    await _handleAIResponse(message);
   }
 
   Future<void> _sendMessage(String text, List<FileAttachment> attachments) async {
@@ -323,6 +305,7 @@ class _SubChatScreenState extends State<SubChatScreen> {
             .where((m) => m.status != MessageStatus.sending)
             .toList(),
         directoryTree: widget.directoryTree,
+        level: _subConversation.level,
       );
 
       await for (var chunk in stream) {
@@ -395,47 +378,32 @@ class _SubChatScreenState extends State<SubChatScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+
     return Scaffold(
       appBar: AppBar(
         title: Text(_subConversation.title),
         centerTitle: true,
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
-          onPressed: () {
-            // 用户手动退出，不标记为完成
-            Navigator.pop(context, null);
-          },
+          onPressed: () => Navigator.pop(context, null),
         ),
         actions: [
-          // 手动标记完成并返回
-          IconButton(
-            icon: const Icon(Icons.check_circle_outline),
-            tooltip: '完成并返回',
-            onPressed: () {
-              showDialog(
-                context: context,
-                builder: (context) => AlertDialog(
-                  title: const Text('完成子会话'),
-                  content: const Text('确定要完成此子会话并返回主界面吗？'),
-                  actions: [
-                    TextButton(
-                      onPressed: () => Navigator.pop(context),
-                      child: const Text('取消'),
-                    ),
-                    TextButton(
-                      onPressed: () {
-                        Navigator.pop(context);
-                        Navigator.pop(this.context, {
-                          'completed': true,
-                          'message': '',
-                        });
-                      },
-                      child: const Text('确定'),
-                    ),
-                  ],
-                ),
-              );
-            },
+          // 显示当前级别
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            margin: const EdgeInsets.only(right: 8),
+            decoration: BoxDecoration(
+              color: colorScheme.secondaryContainer,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Text(
+              _subConversation.levelName,
+              style: TextStyle(
+                fontSize: 12,
+                color: colorScheme.onSecondaryContainer,
+              ),
+            ),
           ),
         ],
       ),
@@ -445,7 +413,14 @@ class _SubChatScreenState extends State<SubChatScreen> {
             child: _subConversation.messages.isEmpty
                 ? Center(
                     child: widget.isResuming
-                        ? const Text('会话已恢复，继续对话')
+                        ? Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(Icons.history, size: 48, color: colorScheme.outline),
+                              const SizedBox(height: 16),
+                              Text('会话已恢复', style: TextStyle(color: colorScheme.outline)),
+                            ],
+                          )
                         : const CircularProgressIndicator(),
                   )
                 : ListView.builder(
