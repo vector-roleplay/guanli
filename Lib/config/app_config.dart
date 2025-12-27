@@ -24,8 +24,9 @@ class AppConfig extends ChangeNotifier {
   // 多级子界面提示词 (索引0=一级, 1=二级, ...)
   List<String> subPrompts = ['', '', '', '', ''];  // 预设5级
   
-  // 文件大小限制 (bytes)
-  static const int maxChunkSize = 900 * 1024; // 900KB
+  // 文件大小限制（按token估算，1 token ≈ 4字符）
+static const int maxTokens = 900000; // 90万token
+static const int maxChunkSize = maxTokens * 4; // 约360万字符
 
   Future<void> load() async {
     final prefs = await SharedPreferences.getInstance();
