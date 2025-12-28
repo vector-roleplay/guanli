@@ -39,11 +39,17 @@ class _SubChatScreenState extends State<SubChatScreen> {
   late SubConversation _subConversation;
   bool _isLoading = false;
   String _streamingContent = '';
+  
+  // 新增：滚动控制
+  bool _userScrolling = false;
+  bool _showScrollButtons = false;
+  bool _isNearBottom = true;
 
   @override
   void initState() {
     super.initState();
     _subConversation = widget.subConversation;
+    _scrollController.addListener(_onScroll);
     
     if (!widget.isResuming && widget.requestedPaths.isNotEmpty) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -52,13 +58,44 @@ class _SubChatScreenState extends State<SubChatScreen> {
     }
   }
 
+  void _onScroll() {
+    if (!_scrollController.hasClients) return;
+    
+    final maxScroll = _scrollController.position.maxScrollExtent;
+    final currentScroll = _scrollController.offset;
+    final nearBottom = (maxScroll - currentScroll) < 50;
+    
+    if (nearBottom != _isNearBottom) {
+      setState(() {
+        _isNearBottom = nearBottom;
+      });
+    }
+    
+    if (!_showScrollButtons) {
+      setState(() {
+        _showScrollButtons = true;
+      });
+    }
+    
+    Future.delayed(const Duration(seconds: 3), () {
+      if (mounted && !_scrollController.position.isScrollingNotifier.value) {
+        setState(() {
+          _showScrollButtons = false;
+        });
+      }
+    });
+  }
+
   @override
   void dispose() {
+    _scrollController.removeListener(_onScroll);
     _scrollController.dispose();
     super.dispose();
   }
 
   void _scrollToBottom() {
+    if (_userScrolling || !_isNearBottom) return;
+    
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_scrollController.hasClients) {
         _scrollController.animateTo(
@@ -68,6 +105,29 @@ class _SubChatScreenState extends State<SubChatScreen> {
         );
       }
     });
+  }
+  
+  void _scrollToTop() {
+    if (_scrollController.hasClients) {
+      _scrollController.animateTo(
+        0,
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.easeOut,
+      );
+    }
+  }
+  
+  void _forceScrollToBottom() {
+    if (_scrollController.hasClients) {
+      _scrollController.animateTo(
+        _scrollController.position.maxScrollExtent,
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.easeOut,
+      );
+      setState(() {
+        _isNearBottom = true;
+      });
+    }
   }
 
   Future<void> _initializeChat() async {
@@ -681,77 +741,122 @@ Future<void> _resendToAI() async {
 }
 
   @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
+Widget build(BuildContext context) {
+  final colorScheme = Theme.of(context).colorScheme;
 
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(_subConversation.title),
-        centerTitle: true,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back),
-          onPressed: () => Navigator.pop(context, null),
+  return Scaffold(
+    appBar: AppBar(
+      title: Text(_subConversation.title),
+      centerTitle: true,
+      leading: IconButton(
+        icon: const Icon(Icons.arrow_back),
+        onPressed: () => Navigator.pop(context, null),
+      ),
+      actions: [
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          margin: const EdgeInsets.only(right: 8),
+          decoration: BoxDecoration(
+            color: colorScheme.secondaryContainer,
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Text(
+            _subConversation.levelName,
+            style: TextStyle(
+              fontSize: 12,
+              color: colorScheme.onSecondaryContainer,
+            ),
+          ),
         ),
-        actions: [
-          // 显示当前级别
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-            margin: const EdgeInsets.only(right: 8),
-            decoration: BoxDecoration(
-              color: colorScheme.secondaryContainer,
-              borderRadius: BorderRadius.circular(12),
+      ],
+    ),
+    body: Stack(
+      children: [
+        Column(
+          children: [
+            Expanded(
+              child: _subConversation.messages.isEmpty
+                  ? Center(
+                      child: widget.isResuming
+                          ? Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Icon(Icons.history, size: 48, color: colorScheme.outline),
+                                const SizedBox(height: 16),
+                                Text('会话已恢复', style: TextStyle(color: colorScheme.outline)),
+                              ],
+                            )
+                          : const CircularProgressIndicator(),
+                    )
+                  : NotificationListener<ScrollNotification>(
+                      onNotification: (notification) {
+                        if (notification is ScrollStartNotification) {
+                          _userScrolling = true;
+                        } else if (notification is ScrollEndNotification) {
+                          _userScrolling = false;
+                          if (_scrollController.hasClients) {
+                            final maxScroll = _scrollController.position.maxScrollExtent;
+                            final currentScroll = _scrollController.offset;
+                            if ((maxScroll - currentScroll) < 50) {
+                              setState(() {
+                                _isNearBottom = true;
+                              });
+                            }
+                          }
+                        }
+                        return false;
+                      },
+                      child: ListView.builder(
+                        controller: _scrollController,
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        itemCount: _subConversation.messages.length,
+                        itemBuilder: (context, index) {
+                          final message = _subConversation.messages[index];
+                          return MessageBubble(
+                            message: message,
+                            onRetry: message.status == MessageStatus.error
+                                ? () => _sendMessage(message.content, message.attachments)
+                                : null,
+                            onDelete: () => _deleteMessage(index),
+                            onRegenerate: message.role == MessageRole.assistant && message.status == MessageStatus.sent
+                                ? () => _regenerateMessage(index)
+                                : null,
+                          );
+                        },
+                      ),
+                    ),
             ),
-            child: Text(
-              _subConversation.levelName,
-              style: TextStyle(
-                fontSize: 12,
-                color: colorScheme.onSecondaryContainer,
-              ),
+            ChatInput(
+              onSend: _sendMessage,
+              enabled: !_isLoading,
+            ),
+          ],
+        ),
+        // 快捷滚动按钮
+        if (_showScrollButtons && _subConversation.messages.isNotEmpty)
+          Positioned(
+            right: 16,
+            bottom: 80,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                FloatingActionButton.small(
+                  heroTag: 'subScrollTop',
+                  onPressed: _scrollToTop,
+                  backgroundColor: colorScheme.secondaryContainer,
+                  child: Icon(Icons.keyboard_arrow_up, color: colorScheme.onSecondaryContainer),
+                ),
+                const SizedBox(height: 8),
+                FloatingActionButton.small(
+                  heroTag: 'subScrollBottom',
+                  onPressed: _forceScrollToBottom,
+                  backgroundColor: colorScheme.primaryContainer,
+                  child: Icon(Icons.keyboard_arrow_down, color: colorScheme.onPrimaryContainer),
+                ),
+              ],
             ),
           ),
-        ],
-      ),
-      body: Column(
-        children: [
-          Expanded(
-            child: _subConversation.messages.isEmpty
-                ? Center(
-                    child: widget.isResuming
-                        ? Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Icon(Icons.history, size: 48, color: colorScheme.outline),
-                              const SizedBox(height: 16),
-                              Text('会话已恢复', style: TextStyle(color: colorScheme.outline)),
-                            ],
-                          )
-                        : const CircularProgressIndicator(),
-                  )
-                : ListView.builder(
-                    controller: _scrollController,
-                    padding: const EdgeInsets.symmetric(vertical: 16),
-                    itemCount: _subConversation.messages.length,
-                    itemBuilder: (context, index) {
-                      final message = _subConversation.messages[index];
-                      return MessageBubble(
-                        message: message,
-                        onRetry: message.status == MessageStatus.error
-                            ? () => _sendMessage(message.content, message.attachments)
-                            : null,
-                        onDelete: () => _deleteMessage(index),
-                        onRegenerate: message.role == MessageRole.assistant && message.status == MessageStatus.sent
-                            ? () => _regenerateMessage(index)
-                            : null,
-                      );
-                    },
-                  ),
-          ),
-          ChatInput(
-            onSend: _sendMessage,
-            enabled: !_isLoading,
-          ),
-        ],
-      ),
-    );
-  }
+      ],
+    ),
+  );
 }
