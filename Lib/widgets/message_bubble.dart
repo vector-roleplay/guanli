@@ -9,6 +9,7 @@ class MessageBubble extends StatefulWidget {
   final Message message;
   final VoidCallback? onRetry;
   final VoidCallback? onDelete;
+  final VoidCallback? onRegenerate; 
 
   const MessageBubble({
     super.key,
@@ -342,6 +343,15 @@ class _MessageBubbleState extends State<MessageBubble> {
                 ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(content: Text('已复制'), duration: Duration(seconds: 1)),
                 );
+              },
+            ),
+            if (isAI && widget.onRegenerate != null)
+            ListTile(
+              leading: const Icon(Icons.refresh),
+              title: const Text('重新生成'),
+              onTap: () {
+                Navigator.pop(context);
+                widget.onRegenerate?.call();
               },
             ),
             if (widget.onDelete != null)
