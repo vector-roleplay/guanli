@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../models/message.dart';
 import 'file_attachment_view.dart';
+import 'code_block.dart';
 
 class MessageBubble extends StatefulWidget {
   final Message message;
@@ -198,9 +199,15 @@ class _MessageBubbleState extends State<MessageBubble> {
   }
 
   Widget _buildSelectableText(BuildContext context, String content) {
-    final isUser = widget.message.role == MessageRole.user;
-    final colorScheme = Theme.of(context).colorScheme;
+  final isUser = widget.message.role == MessageRole.user;
+  final colorScheme = Theme.of(context).colorScheme;
 
+  // 解析代码块
+  final codeBlockRegex = RegExp(r'```(\w*)\n?([\s\S]*?)```');
+  final matches = codeBlockRegex.allMatches(content).toList();
+
+  if (matches.isEmpty) {
+    // 没有代码块，直接显示文本
     return SelectableText(
       content,
       style: TextStyle(
@@ -209,6 +216,57 @@ class _MessageBubbleState extends State<MessageBubble> {
       contextMenuBuilder: _buildChineseContextMenu,
     );
   }
+
+  // 有代码块，分段显示
+  List<Widget> widgets = [];
+  int lastEnd = 0;
+
+  for (var match in matches) {
+    // 代码块之前的文本
+    if (match.start > lastEnd) {
+      final textBefore = content.substring(lastEnd, match.start).trim();
+      if (textBefore.isNotEmpty) {
+        widgets.add(
+          SelectableText(
+            textBefore,
+            style: TextStyle(
+              color: isUser ? colorScheme.onPrimaryContainer : colorScheme.onSurfaceVariant,
+            ),
+            contextMenuBuilder: _buildChineseContextMenu,
+          ),
+        );
+      }
+    }
+
+    // 代码块
+    final language = match.group(1) ?? '';
+    final code = match.group(2) ?? '';
+    widgets.add(CodeBlock(code: code.trim(), language: language.isEmpty ? null : language));
+
+    lastEnd = match.end;
+  }
+
+  // 代码块之后的文本
+  if (lastEnd < content.length) {
+    final textAfter = content.substring(lastEnd).trim();
+    if (textAfter.isNotEmpty) {
+      widgets.add(
+        SelectableText(
+          textAfter,
+          style: TextStyle(
+            color: isUser ? colorScheme.onPrimaryContainer : colorScheme.onSurfaceVariant,
+          ),
+          contextMenuBuilder: _buildChineseContextMenu,
+        ),
+      );
+    }
+  }
+
+  return Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: widgets,
+  );
+}
 
   Widget _buildChineseContextMenu(BuildContext context, EditableTextState editableTextState) {
     final List<ContextMenuButtonItem> buttonItems = [];
