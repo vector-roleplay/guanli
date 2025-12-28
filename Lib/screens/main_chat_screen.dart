@@ -32,11 +32,51 @@ class _MainChatScreenState extends State<MainChatScreen> {
   bool _isLoading = false;
   String _streamingContent = '';
 
+   // 新增：滚动控制
+  bool _userScrolling = false;  // 用户是否正在滚动
+  bool _showScrollButtons = false;  // 是否显示快捷按钮
+  bool _isNearBottom = true;  // 是否接近底部
+
   @override
-  void initState() {
-    super.initState();
-    _init();
+void initState() {
+  super.initState();
+  _init();
+  
+  // 监听滚动
+  _scrollController.addListener(_onScroll);
+}
+
+void _onScroll() {
+  if (!_scrollController.hasClients) return;
+  
+  final maxScroll = _scrollController.position.maxScrollExtent;
+  final currentScroll = _scrollController.offset;
+  
+  // 检查是否接近底部（距离底部50像素内）
+  final nearBottom = (maxScroll - currentScroll) < 50;
+  
+  if (nearBottom != _isNearBottom) {
+    setState(() {
+      _isNearBottom = nearBottom;
+    });
   }
+  
+  // 显示快捷按钮
+  if (!_showScrollButtons) {
+    setState(() {
+      _showScrollButtons = true;
+    });
+  }
+  
+  // 3秒后隐藏按钮
+  Future.delayed(const Duration(seconds: 3), () {
+    if (mounted && !_scrollController.position.isScrollingNotifier.value) {
+      setState(() {
+        _showScrollButtons = false;
+      });
+    }
+  });
+}
 
   Future<void> _init() async {
     await _loadDirectoryTree();
@@ -53,10 +93,11 @@ class _MainChatScreenState extends State<MainChatScreen> {
   }
 
   @override
-  void dispose() {
-    _scrollController.dispose();
-    super.dispose();
-  }
+void dispose() {
+  _scrollController.removeListener(_onScroll);
+  _scrollController.dispose();
+  super.dispose();
+}
 
   Future<void> _loadDirectoryTree() async {
     final tree = await DatabaseService.instance.getDirectoryTree();
@@ -78,16 +119,42 @@ class _MainChatScreenState extends State<MainChatScreen> {
   }
 
   void _scrollToBottom() {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_scrollController.hasClients) {
-        _scrollController.animateTo(
-          _scrollController.position.maxScrollExtent,
-          duration: const Duration(milliseconds: 300),
-          curve: Curves.easeOut,
-        );
-      }
+  // 如果用户正在滚动或不在底部，不自动滚动
+  if (_userScrolling || !_isNearBottom) return;
+  
+  WidgetsBinding.instance.addPostFrameCallback((_) {
+    if (_scrollController.hasClients) {
+      _scrollController.animateTo(
+        _scrollController.position.maxScrollExtent,
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.easeOut,
+      );
+    }
+  });
+}
+
+void _scrollToTop() {
+  if (_scrollController.hasClients) {
+    _scrollController.animateTo(
+      0,
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeOut,
+    );
+  }
+}
+
+void _forceScrollToBottom() {
+  if (_scrollController.hasClients) {
+    _scrollController.animateTo(
+      _scrollController.position.maxScrollExtent,
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeOut,
+    );
+    setState(() {
+      _isNearBottom = true;
     });
   }
+}
 
   Future<void> _deleteMessage(int index) async {
     if (_currentConversation == null) return;
@@ -509,32 +576,80 @@ Future<void> _regenerateMessage(int aiMessageIndex) async {
                       ],
                     ),
                   )
-                : ListView.builder(
-                    controller: _scrollController,
-                    padding: const EdgeInsets.symmetric(vertical: 16),
-                    itemCount: _currentConversation!.messages.length,
-                    itemBuilder: (context, index) {
-                      final message = _currentConversation!.messages[index];
-                      return MessageBubble(
-                        message: message,
-                        onRetry: message.status == MessageStatus.error
-                            ? () => _sendMessage(message.content, message.attachments)
-                            : null,
-                        onDelete: () => _deleteMessage(index),
-                        onRegenerate: message.role == MessageRole.assistant && message.status == MessageStatus.sent
-                            ? () => _regenerateMessage(index)
-                            : null,
-                      );
-                    },
-                  ),
+                : NotificationListener<ScrollNotification>(
+                      onNotification: (notification) {
+                        if (notification is ScrollStartNotification) {
+                          _userScrolling = true;
+                        } else if (notification is ScrollEndNotification) {
+                          _userScrolling = false;
+                          // 检查是否回到底部
+                          if (_scrollController.hasClients) {
+                            final maxScroll = _scrollController.position.maxScrollExtent;
+                            final currentScroll = _scrollController.offset;
+                            if ((maxScroll - currentScroll) < 50) {
+                              setState(() {
+                                _isNearBottom = true;
+                              });
+                            }
+                          }
+                        }
+                        return false;
+                      },
+                      child: ListView.builder(
+                        controller: _scrollController,
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        itemCount: _currentConversation!.messages.length,
+                        itemBuilder: (context, index) {
+                          final message = _currentConversation!.messages[index];
+                          return MessageBubble(
+                            message: message,
+                            onRetry: message.status == MessageStatus.error
+                                ? () => _sendMessage(message.content, message.attachments)
+                                : null,
+                            onDelete: () => _deleteMessage(index),
+                            onRegenerate: message.role == MessageRole.assistant && message.status == MessageStatus.sent
+                                ? () => _regenerateMessage(index)
+                                : null,
+                          );
+                        },
+                      ),
+                    ),
+            ),
+            ChatInput(
+              onSend: _sendMessage,
+              enabled: !_isLoading,
+            ),
+          ],
+        ),
+        // 快捷滚动按钮
+        if (_showScrollButtons && _currentConversation != null && _currentConversation!.messages.isNotEmpty)
+          Positioned(
+            right: 16,
+            bottom: 80,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // 到顶部
+                FloatingActionButton.small(
+                  heroTag: 'scrollTop',
+                  onPressed: _scrollToTop,
+                  backgroundColor: colorScheme.secondaryContainer,
+                  child: Icon(Icons.keyboard_arrow_up, color: colorScheme.onSecondaryContainer),
+                ),
+                const SizedBox(height: 8),
+                // 到底部
+                FloatingActionButton.small(
+                  heroTag: 'scrollBottom',
+                  onPressed: _forceScrollToBottom,
+                  backgroundColor: colorScheme.primaryContainer,
+                  child: Icon(Icons.keyboard_arrow_down, color: colorScheme.onPrimaryContainer),
+                ),
+              ],
+            ),
           ),
-          ChatInput(
-            onSend: _sendMessage,
-            enabled: !_isLoading,
-          ),
-        ],
-      ),
-    );
+      ],
+    ),
+  );
   }
 
   Widget _buildDrawer(BuildContext context) {
