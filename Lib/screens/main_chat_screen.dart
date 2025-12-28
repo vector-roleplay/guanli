@@ -199,39 +199,151 @@ class _MainChatScreenState extends State<MainChatScreen> {
   }
 
   Future<void> _checkAndNavigateToSub(String response) async {
-    // 检测【申请一级子界面】
-    final requestedLevel = _detector.detectSubLevelRequest(response);
+  final requestedLevel = _detector.detectSubLevelRequest(response);
+  
+  if (requestedLevel == 1 && _currentConversation != null) {
+    final paths = _detector.extractPaths(response);
     
-    if (requestedLevel == 1 && _currentConversation != null) {
-      final paths = _detector.extractPaths(response);
-      
-      // 创建一级子会话
-      final subConv = await SubConversationService.instance.create(
-        parentId: _currentConversation!.id,
-        rootConversationId: _currentConversation!.id,
-        level: 1,
-      );
+    final subConv = await SubConversationService.instance.create(
+      parentId: _currentConversation!.id,
+      rootConversationId: _currentConversation!.id,
+      level: 1,
+    );
 
-      final result = await Navigator.push<Map<String, dynamic>>(
-        context,
-        MaterialPageRoute(
-          builder: (context) => SubChatScreen(
-            subConversation: subConv,
-            initialMessage: response,
-            requestedPaths: paths,
-            directoryTree: _directoryTree,
-          ),
+    final result = await Navigator.push<Map<String, dynamic>>(
+      context,
+      MaterialPageRoute(
+        builder: (context) => SubChatScreen(
+          subConversation: subConv,
+          initialMessage: response,
+          requestedPaths: paths,
+          directoryTree: _directoryTree,
+        ),
+      ),
+    );
+
+    // 处理返回 - 自动发送给主界面AI
+    if (result != null && result['message'] != null && result['message'].isNotEmpty) {
+      final returnMessage = result['message'] as String;
+      
+      // 添加一条系统消息显示来自子界面的内容
+      final infoMessage = Message(
+        role: MessageRole.user,
+        content: '【来自子界面的提取结果】\n$returnMessage',
+        status: MessageStatus.sent,
+      );
+      _currentConversation!.messages.add(infoMessage);
+      await ConversationService.instance.update(_currentConversation!);
+      setState(() {});
+      _scrollToBottom();
+      
+      // 自动发送给AI（不带文本，只是触发AI响应）
+      await _sendMessageToAI();
+    }
+    
+    setState(() {});
+  }
+}
+
+// 新增：只发送给AI，不添加新的用户消息
+Future<void> _sendMessageToAI() async {
+  if (_currentConversation == null) return;
+
+  final aiMessage = Message(
+    role: MessageRole.assistant,
+    content: '',
+    status: MessageStatus.sending,
+  );
+  _currentConversation!.messages.add(aiMessage);
+  setState(() {
+    _isLoading = true;
+  });
+  _scrollToBottom();
+
+  final stopwatch = Stopwatch()..start();
+
+  try {
+    String fullContent = '';
+    
+    final result = await ApiService.streamToMainAIWithTokens(
+      messages: _currentConversation!.messages
+          .where((m) => m.status != MessageStatus.sending)
+          .toList(),
+      directoryTree: _directoryTree,
+      onChunk: (chunk) {
+        fullContent += chunk;
+        final msgIndex = _currentConversation!.messages.indexWhere((m) => m.id == aiMessage.id);
+        if (msgIndex != -1) {
+          _currentConversation!.messages[msgIndex] = Message(
+            id: aiMessage.id,
+            role: MessageRole.assistant,
+            content: fullContent,
+            timestamp: aiMessage.timestamp,
+            status: MessageStatus.sending,
+          );
+          setState(() {});
+          _scrollToBottom();
+        }
+      },
+    );
+
+    stopwatch.stop();
+
+    final msgIndex = _currentConversation!.messages.indexWhere((m) => m.id == aiMessage.id);
+    if (msgIndex != -1) {
+      _currentConversation!.messages[msgIndex] = Message(
+        id: aiMessage.id,
+        role: MessageRole.assistant,
+        content: result.content,
+        timestamp: aiMessage.timestamp,
+        status: MessageStatus.sent,
+        tokenUsage: TokenUsage(
+          promptTokens: result.estimatedPromptTokens,
+          completionTokens: result.estimatedCompletionTokens,
+          totalTokens: result.estimatedPromptTokens + result.estimatedCompletionTokens,
+          duration: stopwatch.elapsedMilliseconds / 1000,
         ),
       );
-
-      // 处理返回
-      if (result != null && result['message'] != null && result['message'].isNotEmpty) {
-        await _handleReturnMessage(result['message']);
-      }
-      
-      setState(() {});
     }
+
+    await ConversationService.instance.update(_currentConversation!);
+    setState(() {});
+    _scrollToBottom();
+
+    await _checkAndNavigateToSub(result.content);
+
+  } catch (e) {
+    final msgIndex = _currentConversation!.messages.indexWhere((m) => m.id == aiMessage.id);
+    if (msgIndex != -1) {
+      _currentConversation!.messages[msgIndex] = Message(
+        id: aiMessage.id,
+        role: MessageRole.assistant,
+        content: '发送失败: $e',
+        timestamp: aiMessage.timestamp,
+        status: MessageStatus.error,
+      );
+    }
+    await ConversationService.instance.update(_currentConversation!);
+    setState(() {});
+  } finally {
+    setState(() {
+      _isLoading = false;
+    });
   }
+}
+
+// 新增：重新生成AI回复
+Future<void> _regenerateMessage(int aiMessageIndex) async {
+  if (_currentConversation == null) return;
+  
+  // 删除当前AI消息
+  _currentConversation!.messages.removeAt(aiMessageIndex);
+  await ConversationService.instance.update(_currentConversation!);
+  setState(() {});
+  
+  // 重新发送给AI
+  await _sendMessageToAI();
+}
 
   Future<void> _handleReturnMessage(String message) async {
     // 作为AI消息添加到主界面
@@ -409,6 +521,9 @@ class _MainChatScreenState extends State<MainChatScreen> {
                             ? () => _sendMessage(message.content, message.attachments)
                             : null,
                         onDelete: () => _deleteMessage(index),
+                        onRegenerate: message.role == MessageRole.assistant && message.status == MessageStatus.sent
+                            ? () => _regenerateMessage(index)
+                            : null,
                       );
                     },
                   ),
