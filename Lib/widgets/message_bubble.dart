@@ -9,13 +9,14 @@ class MessageBubble extends StatefulWidget {
   final Message message;
   final VoidCallback? onRetry;
   final VoidCallback? onDelete;
-  final VoidCallback? onRegenerate; 
+  final VoidCallback? onRegenerate;
 
   const MessageBubble({
     super.key,
     required this.message,
     this.onRetry,
     this.onDelete,
+    this.onRegenerate,
   });
 
   @override
@@ -328,24 +329,26 @@ class _MessageBubbleState extends State<MessageBubble> {
   }
 
   void _showOptions(BuildContext context) {
-    showModalBottomSheet(
-      context: context,
-      builder: (context) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              leading: const Icon(Icons.copy),
-              title: const Text('复制全部'),
-              onTap: () {
-                Clipboard.setData(ClipboardData(text: widget.message.content));
-                Navigator.pop(context);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('已复制'), duration: Duration(seconds: 1)),
-                );
-              },
-            ),
-            if (isAI && widget.onRegenerate != null)
+  final isAssistant = widget.message.role == MessageRole.assistant;
+  
+  showModalBottomSheet(
+    context: context,
+    builder: (context) => SafeArea(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          ListTile(
+            leading: const Icon(Icons.copy),
+            title: const Text('复制全部'),
+            onTap: () {
+              Clipboard.setData(ClipboardData(text: widget.message.content));
+              Navigator.pop(context);
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('已复制'), duration: Duration(seconds: 1)),
+              );
+            },
+          ),
+          if (isAssistant && widget.onRegenerate != null)
             ListTile(
               leading: const Icon(Icons.refresh),
               title: const Text('重新生成'),
@@ -354,19 +357,19 @@ class _MessageBubbleState extends State<MessageBubble> {
                 widget.onRegenerate?.call();
               },
             ),
-            if (widget.onDelete != null)
-              ListTile(
-                leading: Icon(Icons.delete_outline, color: Theme.of(context).colorScheme.error),
-                title: Text('删除此消息', style: TextStyle(color: Theme.of(context).colorScheme.error)),
-                onTap: () {
-                  Navigator.pop(context);
-                  _confirmDelete(context);
-                },
-              ),
-          ],
-        ),
+          if (widget.onDelete != null)
+            ListTile(
+              leading: Icon(Icons.delete_outline, color: Theme.of(context).colorScheme.error),
+              title: Text('删除此消息', style: TextStyle(color: Theme.of(context).colorScheme.error)),
+              onTap: () {
+                Navigator.pop(context);
+                _confirmDelete(context);
+              },
+            ),
+        ],
       ),
-    );
+    ),
+  );
   }
 
   void _confirmDelete(BuildContext context) {
