@@ -8,7 +8,6 @@ import '../services/api_service.dart';
 import '../services/database_service.dart';
 import '../services/conversation_service.dart';
 import '../services/sub_conversation_service.dart';
-import '../services/file_service.dart';
 import '../widgets/message_bubble.dart';
 import '../widgets/chat_input.dart';
 import '../utils/message_detector.dart';
@@ -30,53 +29,37 @@ class _MainChatScreenState extends State<MainChatScreen> {
   String _directoryTree = '';
   Conversation? _currentConversation;
   bool _isLoading = false;
-  String _streamingContent = '';
-
-   // 新增：滚动控制
-  bool _userScrolling = false;  // 用户是否正在滚动
-  bool _showScrollButtons = false;  // 是否显示快捷按钮
-  bool _isNearBottom = true;  // 是否接近底部
+  
+  bool _userScrolling = false;
+  bool _showScrollButtons = false;
+  bool _isNearBottom = true;
 
   @override
-void initState() {
-  super.initState();
-  _init();
-  
-  // 监听滚动
-  _scrollController.addListener(_onScroll);
-}
+  void initState() {
+    super.initState();
+    _init();
+    _scrollController.addListener(_onScroll);
+  }
 
-void _onScroll() {
-  if (!_scrollController.hasClients) return;
-  
-  final maxScroll = _scrollController.position.maxScrollExtent;
-  final currentScroll = _scrollController.offset;
-  
-  // 检查是否接近底部（距离底部50像素内）
-  final nearBottom = (maxScroll - currentScroll) < 50;
-  
-  if (nearBottom != _isNearBottom) {
-    setState(() {
-      _isNearBottom = nearBottom;
-    });
-  }
-  
-  // 显示快捷按钮
-  if (!_showScrollButtons) {
-    setState(() {
-      _showScrollButtons = true;
-    });
-  }
-  
-  // 3秒后隐藏按钮
-  Future.delayed(const Duration(seconds: 3), () {
-    if (mounted && !_scrollController.position.isScrollingNotifier.value) {
+  void _onScroll() {
+    if (!_scrollController.hasClients) return;
+    
+    final maxScroll = _scrollController.position.maxScrollExtent;
+    final currentScroll = _scrollController.offset;
+    final nearBottom = (maxScroll - currentScroll) < 50;
+    
+    if (nearBottom != _isNearBottom) {
       setState(() {
-        _showScrollButtons = false;
+        _isNearBottom = nearBottom;
       });
     }
-  });
-}
+    
+    if (!_showScrollButtons) {
+      setState(() {
+        _showScrollButtons = true;
+      });
+    }
+  }
 
   Future<void> _init() async {
     await _loadDirectoryTree();
@@ -93,11 +76,11 @@ void _onScroll() {
   }
 
   @override
-void dispose() {
-  _scrollController.removeListener(_onScroll);
-  _scrollController.dispose();
-  super.dispose();
-}
+  void dispose() {
+    _scrollController.removeListener(_onScroll);
+    _scrollController.dispose();
+    super.dispose();
+  }
 
   Future<void> _loadDirectoryTree() async {
     final tree = await DatabaseService.instance.getDirectoryTree();
@@ -119,49 +102,55 @@ void dispose() {
   }
 
   void _scrollToBottom() {
-  // 如果用户正在滚动或不在底部，不自动滚动
-  if (_userScrolling || !_isNearBottom) return;
-  
-  WidgetsBinding.instance.addPostFrameCallback((_) {
+    if (_userScrolling || !_isNearBottom) return;
+    
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_scrollController.hasClients) {
+        _scrollController.animateTo(
+          _scrollController.position.maxScrollExtent,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeOut,
+        );
+      }
+    });
+  }
+
+  void _scrollToTop() {
+    if (_scrollController.hasClients) {
+      _scrollController.animateTo(
+        0,
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.easeOut,
+      );
+    }
+  }
+
+  void _forceScrollToBottom() {
     if (_scrollController.hasClients) {
       _scrollController.animateTo(
         _scrollController.position.maxScrollExtent,
         duration: const Duration(milliseconds: 300),
         curve: Curves.easeOut,
       );
+      setState(() {
+        _isNearBottom = true;
+      });
     }
-  });
-}
-
-void _scrollToTop() {
-  if (_scrollController.hasClients) {
-    _scrollController.animateTo(
-      0,
-      duration: const Duration(milliseconds: 300),
-      curve: Curves.easeOut,
-    );
   }
-}
-
-void _forceScrollToBottom() {
-  if (_scrollController.hasClients) {
-    _scrollController.animateTo(
-      _scrollController.position.maxScrollExtent,
-      duration: const Duration(milliseconds: 300),
-      curve: Curves.easeOut,
-    );
-    setState(() {
-      _isNearBottom = true;
-    });
-  }
-}
 
   Future<void> _deleteMessage(int index) async {
     if (_currentConversation == null) return;
-    
     _currentConversation!.messages.removeAt(index);
     await ConversationService.instance.update(_currentConversation!);
     setState(() {});
+  }
+
+  Future<void> _regenerateMessage(int aiMessageIndex) async {
+    if (_currentConversation == null) return;
+    _currentConversation!.messages.removeAt(aiMessageIndex);
+    await ConversationService.instance.update(_currentConversation!);
+    setState(() {});
+    await _sendMessageToAI();
   }
 
   Future<void> _sendMessage(String text, List<FileAttachment> attachments) async {
@@ -179,6 +168,12 @@ void _forceScrollToBottom() {
     setState(() {});
     _scrollToBottom();
 
+    await _sendMessageToAI();
+  }
+
+  Future<void> _sendMessageToAI() async {
+    if (_currentConversation == null) return;
+
     final aiMessage = Message(
       role: MessageRole.assistant,
       content: '',
@@ -187,62 +182,60 @@ void _forceScrollToBottom() {
     _currentConversation!.messages.add(aiMessage);
     setState(() {
       _isLoading = true;
-      _streamingContent = '';
     });
     _scrollToBottom();
 
     final stopwatch = Stopwatch()..start();
 
     try {
-  String fullContent = '';
-  
-  final result = await ApiService.streamToMainAIWithTokens(
-    messages: _currentConversation!.messages
-        .where((m) => m.status != MessageStatus.sending)
-        .toList(),
-    directoryTree: _directoryTree,
-    onChunk: (chunk) {
-      fullContent += chunk;
+      String fullContent = '';
+      
+      final result = await ApiService.streamToMainAIWithTokens(
+        messages: _currentConversation!.messages
+            .where((m) => m.status != MessageStatus.sending)
+            .toList(),
+        directoryTree: _directoryTree,
+        onChunk: (chunk) {
+          fullContent += chunk;
+          final msgIndex = _currentConversation!.messages.indexWhere((m) => m.id == aiMessage.id);
+          if (msgIndex != -1) {
+            _currentConversation!.messages[msgIndex] = Message(
+              id: aiMessage.id,
+              role: MessageRole.assistant,
+              content: fullContent,
+              timestamp: aiMessage.timestamp,
+              status: MessageStatus.sending,
+            );
+            setState(() {});
+            _scrollToBottom();
+          }
+        },
+      );
+
+      stopwatch.stop();
+
       final msgIndex = _currentConversation!.messages.indexWhere((m) => m.id == aiMessage.id);
       if (msgIndex != -1) {
         _currentConversation!.messages[msgIndex] = Message(
           id: aiMessage.id,
           role: MessageRole.assistant,
-          content: fullContent,
+          content: result.content,
           timestamp: aiMessage.timestamp,
-          status: MessageStatus.sending,
+          status: MessageStatus.sent,
+          tokenUsage: TokenUsage(
+            promptTokens: result.estimatedPromptTokens,
+            completionTokens: result.estimatedCompletionTokens,
+            totalTokens: result.estimatedPromptTokens + result.estimatedCompletionTokens,
+            duration: stopwatch.elapsedMilliseconds / 1000,
+          ),
         );
-        setState(() {});
-        _scrollToBottom();
       }
-    },
-  );
 
-  stopwatch.stop();
+      await ConversationService.instance.update(_currentConversation!);
+      setState(() {});
+      _scrollToBottom();
 
-  final msgIndex = _currentConversation!.messages.indexWhere((m) => m.id == aiMessage.id);
-  if (msgIndex != -1) {
-    _currentConversation!.messages[msgIndex] = Message(
-      id: aiMessage.id,
-      role: MessageRole.assistant,
-      content: result.content,
-      timestamp: aiMessage.timestamp,
-      status: MessageStatus.sent,
-      tokenUsage: TokenUsage(
-        promptTokens: result.estimatedPromptTokens,
-        completionTokens: result.estimatedCompletionTokens,
-        totalTokens: result.estimatedPromptTokens + result.estimatedCompletionTokens,
-        duration: stopwatch.elapsedMilliseconds / 1000,
-      ),
-    );
-  }
-
-  await ConversationService.instance.update(_currentConversation!);
-  setState(() {});
-  _scrollToBottom();
-
-  await _checkAndNavigateToSub(result.content);
-        
+      await _checkAndNavigateToSub(result.content);
 
     } catch (e) {
       final msgIndex = _currentConversation!.messages.indexWhere((m) => m.id == aiMessage.id);
@@ -260,172 +253,54 @@ void _forceScrollToBottom() {
     } finally {
       setState(() {
         _isLoading = false;
-        _streamingContent = '';
       });
     }
   }
 
   Future<void> _checkAndNavigateToSub(String response) async {
-  final requestedLevel = _detector.detectSubLevelRequest(response);
-  
-  if (requestedLevel == 1 && _currentConversation != null) {
-    final paths = _detector.extractPaths(response);
+    final requestedLevel = _detector.detectSubLevelRequest(response);
     
-    final subConv = await SubConversationService.instance.create(
-      parentId: _currentConversation!.id,
-      rootConversationId: _currentConversation!.id,
-      level: 1,
-    );
-
-    final result = await Navigator.push<Map<String, dynamic>>(
-      context,
-      MaterialPageRoute(
-        builder: (context) => SubChatScreen(
-          subConversation: subConv,
-          initialMessage: response,
-          requestedPaths: paths,
-          directoryTree: _directoryTree,
-        ),
-      ),
-    );
-
-    // 处理返回 - 自动发送给主界面AI
-    if (result != null && result['message'] != null && result['message'].isNotEmpty) {
-      final returnMessage = result['message'] as String;
+    if (requestedLevel == 1 && _currentConversation != null) {
+      final paths = _detector.extractPaths(response);
       
-      // 添加一条系统消息显示来自子界面的内容
-      final infoMessage = Message(
-        role: MessageRole.user,
-        content: '【来自子界面的提取结果】\n$returnMessage',
-        status: MessageStatus.sent,
+      final subConv = await SubConversationService.instance.create(
+        parentId: _currentConversation!.id,
+        rootConversationId: _currentConversation!.id,
+        level: 1,
       );
-      _currentConversation!.messages.add(infoMessage);
-      await ConversationService.instance.update(_currentConversation!);
+
+      final result = await Navigator.push<Map<String, dynamic>>(
+        context,
+        MaterialPageRoute(
+          builder: (context) => SubChatScreen(
+            subConversation: subConv,
+            initialMessage: response,
+            requestedPaths: paths,
+            directoryTree: _directoryTree,
+          ),
+        ),
+      );
+
+      if (result != null && result['message'] != null && result['message'].isNotEmpty) {
+        final returnMessage = result['message'] as String;
+        
+        final infoMessage = Message(
+          role: MessageRole.user,
+          content: '【来自子界面的提取结果】\n$returnMessage',
+          status: MessageStatus.sent,
+        );
+        _currentConversation!.messages.add(infoMessage);
+        await ConversationService.instance.update(_currentConversation!);
+        setState(() {});
+        _scrollToBottom();
+        
+        await _sendMessageToAI();
+      }
+      
       setState(() {});
-      _scrollToBottom();
-      
-      // 自动发送给AI（不带文本，只是触发AI响应）
-      await _sendMessageToAI();
     }
-    
-    setState(() {});
-  }
-}
-
-// 新增：只发送给AI，不添加新的用户消息
-Future<void> _sendMessageToAI() async {
-  if (_currentConversation == null) return;
-
-  final aiMessage = Message(
-    role: MessageRole.assistant,
-    content: '',
-    status: MessageStatus.sending,
-  );
-  _currentConversation!.messages.add(aiMessage);
-  setState(() {
-    _isLoading = true;
-  });
-  _scrollToBottom();
-
-  final stopwatch = Stopwatch()..start();
-
-  try {
-    String fullContent = '';
-    
-    final result = await ApiService.streamToMainAIWithTokens(
-      messages: _currentConversation!.messages
-          .where((m) => m.status != MessageStatus.sending)
-          .toList(),
-      directoryTree: _directoryTree,
-      onChunk: (chunk) {
-        fullContent += chunk;
-        final msgIndex = _currentConversation!.messages.indexWhere((m) => m.id == aiMessage.id);
-        if (msgIndex != -1) {
-          _currentConversation!.messages[msgIndex] = Message(
-            id: aiMessage.id,
-            role: MessageRole.assistant,
-            content: fullContent,
-            timestamp: aiMessage.timestamp,
-            status: MessageStatus.sending,
-          );
-          setState(() {});
-          _scrollToBottom();
-        }
-      },
-    );
-
-    stopwatch.stop();
-
-    final msgIndex = _currentConversation!.messages.indexWhere((m) => m.id == aiMessage.id);
-    if (msgIndex != -1) {
-      _currentConversation!.messages[msgIndex] = Message(
-        id: aiMessage.id,
-        role: MessageRole.assistant,
-        content: result.content,
-        timestamp: aiMessage.timestamp,
-        status: MessageStatus.sent,
-        tokenUsage: TokenUsage(
-          promptTokens: result.estimatedPromptTokens,
-          completionTokens: result.estimatedCompletionTokens,
-          totalTokens: result.estimatedPromptTokens + result.estimatedCompletionTokens,
-          duration: stopwatch.elapsedMilliseconds / 1000,
-        ),
-      );
-    }
-
-    await ConversationService.instance.update(_currentConversation!);
-    setState(() {});
-    _scrollToBottom();
-
-    await _checkAndNavigateToSub(result.content);
-
-  } catch (e) {
-    final msgIndex = _currentConversation!.messages.indexWhere((m) => m.id == aiMessage.id);
-    if (msgIndex != -1) {
-      _currentConversation!.messages[msgIndex] = Message(
-        id: aiMessage.id,
-        role: MessageRole.assistant,
-        content: '发送失败: $e',
-        timestamp: aiMessage.timestamp,
-        status: MessageStatus.error,
-      );
-    }
-    await ConversationService.instance.update(_currentConversation!);
-    setState(() {});
-  } finally {
-    setState(() {
-      _isLoading = false;
-    });
-  }
-}
-
-// 新增：重新生成AI回复
-Future<void> _regenerateMessage(int aiMessageIndex) async {
-  if (_currentConversation == null) return;
-  
-  // 删除当前AI消息
-  _currentConversation!.messages.removeAt(aiMessageIndex);
-  await ConversationService.instance.update(_currentConversation!);
-  setState(() {});
-  
-  // 重新发送给AI
-  await _sendMessageToAI();
-}
-
-  Future<void> _handleReturnMessage(String message) async {
-    // 作为AI消息添加到主界面
-    final returnMessage = Message(
-      role: MessageRole.assistant,
-      content: '【来自子界面的返回】\n$message',
-      status: MessageStatus.sent,
-    );
-    _currentConversation!.messages.add(returnMessage);
-    await ConversationService.instance.update(_currentConversation!);
-    setState(() {});
-    _scrollToBottom();
   }
 
-  // 进入已存在的子会话
   Future<void> _enterSubConversation(SubConversation subConv) async {
     Navigator.pop(context);
     
@@ -443,9 +318,18 @@ Future<void> _regenerateMessage(int aiMessageIndex) async {
     );
 
     if (result != null && result['message'] != null && result['message'].isNotEmpty) {
-      // 只有一级子界面返回的消息才发送给主界面
       if (subConv.level == 1) {
-        await _handleReturnMessage(result['message']);
+        final returnMessage = result['message'] as String;
+        final infoMessage = Message(
+          role: MessageRole.user,
+          content: '【来自子界面的提取结果】\n$returnMessage',
+          status: MessageStatus.sent,
+        );
+        _currentConversation!.messages.add(infoMessage);
+        await ConversationService.instance.update(_currentConversation!);
+        setState(() {});
+        _scrollToBottom();
+        await _sendMessageToAI();
       }
     }
     setState(() {});
@@ -532,6 +416,7 @@ Future<void> _regenerateMessage(int aiMessageIndex) async {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    final hasMessages = _currentConversation != null && _currentConversation!.messages.isNotEmpty;
 
     return Scaffold(
       key: _scaffoldKey,
@@ -562,101 +447,98 @@ Future<void> _regenerateMessage(int aiMessageIndex) async {
         ],
       ),
       drawer: _buildDrawer(context),
-      body: Column(
+      body: Stack(
         children: [
-          Expanded(
-            child: _currentConversation == null || _currentConversation!.messages.isEmpty
-                ? Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(Icons.chat_bubble_outline, size: 64, color: colorScheme.outline),
-                        const SizedBox(height: 16),
-                        Text('开始新对话', style: TextStyle(fontSize: 18, color: colorScheme.outline)),
-                      ],
-                    ),
-                  )
-                : NotificationListener<ScrollNotification>(
-                      onNotification: (notification) {
-                        if (notification is ScrollStartNotification) {
-                          _userScrolling = true;
-                        } else if (notification is ScrollEndNotification) {
-                          _userScrolling = false;
-                          // 检查是否回到底部
-                          if (_scrollController.hasClients) {
-                            final maxScroll = _scrollController.position.maxScrollExtent;
-                            final currentScroll = _scrollController.offset;
-                            if ((maxScroll - currentScroll) < 50) {
-                              setState(() {
-                                _isNearBottom = true;
-                              });
+          Column(
+            children: [
+              Expanded(
+                child: !hasMessages
+                    ? Center(
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(Icons.chat_bubble_outline, size: 64, color: colorScheme.outline),
+                            const SizedBox(height: 16),
+                            Text('开始新对话', style: TextStyle(fontSize: 18, color: colorScheme.outline)),
+                          ],
+                        ),
+                      )
+                    : NotificationListener<ScrollNotification>(
+                        onNotification: (notification) {
+                          if (notification is ScrollStartNotification) {
+                            _userScrolling = true;
+                          } else if (notification is ScrollEndNotification) {
+                            _userScrolling = false;
+                            if (_scrollController.hasClients) {
+                              final maxScroll = _scrollController.position.maxScrollExtent;
+                              final currentScroll = _scrollController.offset;
+                              if ((maxScroll - currentScroll) < 50) {
+                                setState(() {
+                                  _isNearBottom = true;
+                                });
+                              }
                             }
                           }
-                        }
-                        return false;
-                      },
-                      child: ListView.builder(
-                        controller: _scrollController,
-                        padding: const EdgeInsets.symmetric(vertical: 16),
-                        itemCount: _currentConversation!.messages.length,
-                        itemBuilder: (context, index) {
-                          final message = _currentConversation!.messages[index];
-                          return MessageBubble(
-                            message: message,
-                            onRetry: message.status == MessageStatus.error
-                                ? () => _sendMessage(message.content, message.attachments)
-                                : null,
-                            onDelete: () => _deleteMessage(index),
-                            onRegenerate: message.role == MessageRole.assistant && message.status == MessageStatus.sent
-                                ? () => _regenerateMessage(index)
-                                : null,
-                          );
+                          return false;
                         },
+                        child: ListView.builder(
+                          controller: _scrollController,
+                          padding: const EdgeInsets.symmetric(vertical: 16),
+                          itemCount: _currentConversation!.messages.length,
+                          itemBuilder: (context, index) {
+                            final message = _currentConversation!.messages[index];
+                            return MessageBubble(
+                              message: message,
+                              onRetry: message.status == MessageStatus.error
+                                  ? () => _sendMessage(message.content, message.attachments)
+                                  : null,
+                              onDelete: () => _deleteMessage(index),
+                              onRegenerate: message.role == MessageRole.assistant && message.status == MessageStatus.sent
+                                  ? () => _regenerateMessage(index)
+                                  : null,
+                            );
+                          },
+                        ),
                       ),
-                    ),
-            ),
-            ChatInput(
-              onSend: _sendMessage,
-              enabled: !_isLoading,
-            ),
-          ],
-        ),
-        // 快捷滚动按钮
-        if (_showScrollButtons && _currentConversation != null && _currentConversation!.messages.isNotEmpty)
-          Positioned(
-            right: 16,
-            bottom: 80,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                // 到顶部
-                FloatingActionButton.small(
-                  heroTag: 'scrollTop',
-                  onPressed: _scrollToTop,
-                  backgroundColor: colorScheme.secondaryContainer,
-                  child: Icon(Icons.keyboard_arrow_up, color: colorScheme.onSecondaryContainer),
-                ),
-                const SizedBox(height: 8),
-                // 到底部
-                FloatingActionButton.small(
-                  heroTag: 'scrollBottom',
-                  onPressed: _forceScrollToBottom,
-                  backgroundColor: colorScheme.primaryContainer,
-                  child: Icon(Icons.keyboard_arrow_down, color: colorScheme.onPrimaryContainer),
-                ),
-              ],
-            ),
+              ),
+              ChatInput(
+                onSend: _sendMessage,
+                enabled: !_isLoading,
+              ),
+            ],
           ),
-      ],
-    ),
-  );
+          if (_showScrollButtons && hasMessages)
+            Positioned(
+              right: 16,
+              bottom: 80,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  FloatingActionButton.small(
+                    heroTag: 'scrollTop',
+                    onPressed: _scrollToTop,
+                    backgroundColor: colorScheme.secondaryContainer,
+                    child: Icon(Icons.keyboard_arrow_up, color: colorScheme.onSecondaryContainer),
+                  ),
+                  const SizedBox(height: 8),
+                  FloatingActionButton.small(
+                    heroTag: 'scrollBottom',
+                    onPressed: _forceScrollToBottom,
+                    backgroundColor: colorScheme.primaryContainer,
+                    child: Icon(Icons.keyboard_arrow_down, color: colorScheme.onPrimaryContainer),
+                  ),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
   }
 
   Widget _buildDrawer(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     final conversations = ConversationService.instance.conversations;
     
-    // 获取当前会话的所有子会话
     List<SubConversation> allSubConvs = [];
     if (_currentConversation != null) {
       allSubConvs = SubConversationService.instance.getByRootId(_currentConversation!.id);
@@ -689,58 +571,24 @@ Future<void> _regenerateMessage(int aiMessageIndex) async {
             ),
             const Divider(height: 1),
 
-            // 当前会话的子界面列表
             if (allSubConvs.isNotEmpty) ...[
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                 alignment: Alignment.centerLeft,
                 child: Text(
                   '子界面 (${allSubConvs.length}个)',
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: colorScheme.primary,
-                    fontWeight: FontWeight.bold,
-                  ),
+                  style: TextStyle(fontSize: 12, color: colorScheme.primary, fontWeight: FontWeight.bold),
                 ),
               ),
               ...allSubConvs.map((sub) => ListTile(
-                leading: Icon(
-                  Icons.subdirectory_arrow_right,
-                  color: colorScheme.secondary,
-                ),
-                title: Text(
-                  sub.title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                subtitle: Text(
-                  '${sub.levelName} · ${sub.messages.length}条消息',
-                  style: TextStyle(fontSize: 12, color: colorScheme.outline),
-                ),
+                leading: Icon(Icons.subdirectory_arrow_right, color: colorScheme.secondary),
+                title: Text(sub.title, maxLines: 1, overflow: TextOverflow.ellipsis),
+                subtitle: Text('${sub.levelName} · ${sub.messages.length}条消息', style: TextStyle(fontSize: 12, color: colorScheme.outline)),
                 trailing: IconButton(
                   icon: Icon(Icons.delete_outline, size: 20, color: colorScheme.error),
                   onPressed: () async {
-                    final confirm = await showDialog<bool>(
-                      context: context,
-                      builder: (context) => AlertDialog(
-                        title: const Text('删除子界面'),
-                        content: Text('确定要删除「${sub.title}」吗？'),
-                        actions: [
-                          TextButton(
-                            onPressed: () => Navigator.pop(context, false),
-                            child: const Text('取消'),
-                          ),
-                          TextButton(
-                            onPressed: () => Navigator.pop(context, true),
-                            child: Text('删除', style: TextStyle(color: colorScheme.error)),
-                          ),
-                        ],
-                      ),
-                    );
-                    if (confirm == true) {
-                      await SubConversationService.instance.delete(sub.id);
-                      setState(() {});
-                    }
+                    await SubConversationService.instance.delete(sub.id);
+                    setState(() {});
                   },
                 ),
                 onTap: () => _enterSubConversation(sub),
@@ -748,7 +596,6 @@ Future<void> _regenerateMessage(int aiMessageIndex) async {
               const Divider(height: 1),
             ],
 
-            // 主会话列表
             Expanded(
               child: ListView.builder(
                 itemCount: conversations.length,
@@ -772,23 +619,14 @@ Future<void> _regenerateMessage(int aiMessageIndex) async {
                             top: 0,
                             child: Container(
                               padding: const EdgeInsets.all(2),
-                              decoration: BoxDecoration(
-                                color: colorScheme.secondary,
-                                shape: BoxShape.circle,
-                              ),
-                              child: Text(
-                                '$subCount',
-                                style: const TextStyle(fontSize: 8, color: Colors.white),
-                              ),
+                              decoration: BoxDecoration(color: colorScheme.secondary, shape: BoxShape.circle),
+                              child: Text('$subCount', style: const TextStyle(fontSize: 8, color: Colors.white)),
                             ),
                           ),
                       ],
                     ),
                     title: Text(conv.title, maxLines: 1, overflow: TextOverflow.ellipsis),
-                    subtitle: Text(
-                      '${conv.messages.length} 条消息',
-                      style: TextStyle(fontSize: 12, color: colorScheme.outline),
-                    ),
+                    subtitle: Text('${conv.messages.length} 条消息', style: TextStyle(fontSize: 12, color: colorScheme.outline)),
                     trailing: PopupMenuButton(
                       icon: Icon(Icons.more_vert, color: colorScheme.outline),
                       itemBuilder: (context) => [
