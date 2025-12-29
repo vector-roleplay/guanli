@@ -240,5 +240,14 @@ class DatabaseService {
 
   Future<void> deleteFile(String path) async {
     await db.delete('files', where: 'path = ? OR parent_path LIKE ?', whereArgs: [path, '$path%']);
+  }// 获取所有文件内容（用于一键发送）
+  Future<List<Map<String, dynamic>>> getAllFilesWithContent() async {
+    return await db.query(
+      'files',
+      columns: ['path', 'name', 'content', 'size'],
+      where: 'is_directory = 0 AND content IS NOT NULL',
+      orderBy: 'path',
+    );
   }
+
 }
