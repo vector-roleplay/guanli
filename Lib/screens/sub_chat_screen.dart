@@ -729,20 +729,27 @@ class _SubChatScreenState extends State<SubChatScreen> {
               ChatInput(
                 onSend: _sendMessage,
                 enabled: !_isLoading,
+                isGenerating: _isLoading,
+                onStop: _stopGeneration,
               ),
+
             ],
           ),
           if (_showScrollButtons && hasMessages)
             Positioned(
-              right: 12,
               bottom: 80,
-              child: ScrollButtons(
-                onScrollToTop: _scrollToTop,
-                onScrollToBottom: _forceScrollToBottom,
-                onPreviousMessage: _scrollToPreviousMessage,
-                onNextMessage: _scrollToNextMessage,
+              left: 0,
+              right: 0,
+              child: Center(
+                child: ScrollButtons(
+                  onScrollToTop: _scrollToTop,
+                  onScrollToBottom: _forceScrollToBottom,
+                  onPreviousMessage: _scrollToPreviousMessage,
+                  onNextMessage: _scrollToNextMessage,
+                ),
               ),
             ),
+
         ],
       ),
     );
