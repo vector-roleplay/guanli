@@ -463,7 +463,39 @@ class _SubChatScreenState extends State<SubChatScreen> {
         level: _subConversation.level,
         onChunk: (chunk) {
           fullResponseContent += chunk;
-          final msgIndex = _subConversation.messages.indexWhere((m) => m.id == aiMessage.id);
+          _pendingContent = fullResponseContent;
+          
+          // 节流：100ms 更新一次 UI
+          final now = DateTime.now();
+          if (now.difference(_lastUIUpdate) >= _uiUpdateInterval) {
+            _lastUIUpdate = now;
+            final msgIndex = _subConversation.messages.indexWhere((m) => m.id == aiMessage.id);
+            if (msgIndex != -1) {
+              _subConversation.messages[msgIndex] = Message(
+                id: aiMessage.id,
+                role: MessageRole.assistant,
+                content: _pendingContent,
+                timestamp: aiMessage.timestamp,
+                status: MessageStatus.sending,
+              );
+              setState(() {});
+              _scrollToBottom();
+            }
+          }
+        },
+      );
+      
+      // 确保最后一次更新
+      final msgIndexFinal = _subConversation.messages.indexWhere((m) => m.id == aiMessage.id);
+      if (msgIndexFinal != -1 && _pendingContent.isNotEmpty) {
+        _subConversation.messages[msgIndexFinal] = Message(
+          id: aiMessage.id,
+          role: MessageRole.assistant,
+          content: _pendingContent,
+          timestamp: aiMessage.timestamp,
+          status: MessageStatus.sending,
+        );
+      }
           if (msgIndex != -1) {
             _subConversation.messages[msgIndex] = Message(
               id: aiMessage.id,
