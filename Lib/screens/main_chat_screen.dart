@@ -15,6 +15,7 @@ import '../widgets/chat_input.dart';
 import '../widgets/scroll_buttons.dart';
 import '../utils/message_detector.dart';
 import 'settings_screen.dart';
+import 'database_screen.dart';
 import 'sub_chat_screen.dart';
 
 class MainChatScreen extends StatefulWidget {
@@ -51,9 +52,7 @@ class _MainChatScreenState extends State<MainChatScreen> {
     final maxScroll = _scrollController.position.maxScrollExtent;
     final currentScroll = _scrollController.offset;
     final nearBottom = (maxScroll - currentScroll) < 50;
-    if (nearBottom != _isNearBottom) {
-      setState(() => _isNearBottom = nearBottom);
-    }
+    if (nearBottom != _isNearBottom) setState(() => _isNearBottom = nearBottom);
     setState(() => _showScrollButtons = true);
     _hideButtonsTimer?.cancel();
     _hideButtonsTimer = Timer(const Duration(seconds: 1), () {
@@ -105,11 +104,7 @@ class _MainChatScreenState extends State<MainChatScreen> {
     if (_userScrolling || !_isNearBottom) return;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_scrollController.hasClients) {
-        _scrollController.animateTo(
-          _scrollController.position.maxScrollExtent,
-          duration: const Duration(milliseconds: 300),
-          curve: Curves.easeOut,
-        );
+        _scrollController.animateTo(_scrollController.position.maxScrollExtent, duration: const Duration(milliseconds: 300), curve: Curves.easeOut);
       }
     });
   }
@@ -122,11 +117,7 @@ class _MainChatScreenState extends State<MainChatScreen> {
 
   void _forceScrollToBottom() {
     if (_scrollController.hasClients) {
-      _scrollController.animateTo(
-        _scrollController.position.maxScrollExtent,
-        duration: const Duration(milliseconds: 300),
-        curve: Curves.easeOut,
-      );
+      _scrollController.animateTo(_scrollController.position.maxScrollExtent, duration: const Duration(milliseconds: 300), curve: Curves.easeOut);
       setState(() => _isNearBottom = true);
     }
   }
@@ -390,12 +381,16 @@ class _MainChatScreenState extends State<MainChatScreen> {
         title: Text(_currentConversation?.title ?? 'AI 对话'),
         centerTitle: true,
         actions: [
+          IconButton(
+            onPressed: () async {
+              await Navigator.push(context, MaterialPageRoute(builder: (context) => const DatabaseScreen()));
+              _loadDirectoryTree();
+            },
+            icon: const Icon(Icons.folder_outlined),
+            tooltip: '文件数据库',
+          ),
           IconButton(onPressed: _sendAllFiles, icon: const Icon(Icons.upload_file), tooltip: '发送所有文件'),
           IconButton(onPressed: _clearCurrentChat, icon: const Icon(Icons.delete_outline), tooltip: '清空对话'),
-          IconButton(onPressed: () async {
-            await Navigator.push(context, MaterialPageRoute(builder: (context) => const SettingsScreen()));
-            _loadDirectoryTree();
-          }, icon: const Icon(Icons.settings), tooltip: '设置'),
         ],
       ),
       drawer: _buildDrawer(context),
@@ -456,45 +451,213 @@ class _MainChatScreenState extends State<MainChatScreen> {
     final conversations = ConversationService.instance.conversations;
     List<SubConversation> allSubConvs = [];
     if (_currentConversation != null) allSubConvs = SubConversationService.instance.getByRootId(_currentConversation!.id);
+    
     return Drawer(
       child: SafeArea(
-        child: Column(children: [
-          Container(padding: const EdgeInsets.all(16), child: Row(children: [Icon(Icons.chat, color: colorScheme.primary), const SizedBox(width: 12), const Text('会话列表', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold))])),
-          const Divider(height: 1),
-          ListTile(leading: Icon(Icons.add, color: colorScheme.primary), title: const Text('新建会话'), onTap: () async { await _createNewConversation(); Navigator.pop(context); }),
-          const Divider(height: 1),
-          if (allSubConvs.isNotEmpty) ...[
-            Container(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8), alignment: Alignment.centerLeft, child: Text('子界面 (${allSubConvs.length}个)', style: TextStyle(fontSize: 12, color: colorScheme.primary, fontWeight: FontWeight.bold))),
-            ...allSubConvs.map((sub) => ListTile(
-              leading: Icon(Icons.subdirectory_arrow_right, color: colorScheme.secondary),
-              title: Text(sub.title, maxLines: 1, overflow: TextOverflow.ellipsis),
-              subtitle: Text('${sub.levelName} · ${sub.messages.length}条消息', style: TextStyle(fontSize: 12, color: colorScheme.outline)),
-              trailing: IconButton(icon: Icon(Icons.delete_outline, size: 20, color: colorScheme.error), onPressed: () async { await SubConversationService.instance.delete(sub.id); setState(() {}); }),
-              onTap: () => _enterSubConversation(sub),
-            )),
+        child: Column(
+          children: [
+            // 顶部标题栏
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Row(
+                children: [
+                  Icon(Icons.chat_bubble_outline, color: colorScheme.primary, size: 28),
+                  const SizedBox(width: 12),
+                  const Expanded(child: Text('会话列表', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold))),
+                ],
+              ),
+            ),
+            
+            // 新建会话按钮
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              child: Material(
+                color: Colors.transparent,
+                child: InkWell(
+                  onTap: () async { await _createNewConversation(); Navigator.pop(context); },
+                  borderRadius: BorderRadius.circular(12),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                    decoration: BoxDecoration(
+                      border: Border.all(color: colorScheme.outline.withOpacity(0.3)),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(Icons.add, color: colorScheme.primary),
+                        const SizedBox(width: 12),
+                        const Text('新建会话', style: TextStyle(fontSize: 16)),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 8),
+            
+            // 子界面列表
+            if (allSubConvs.isNotEmpty) ...[
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                child: Row(
+                  children: [
+                    Text('子界面', style: TextStyle(fontSize: 12, color: colorScheme.primary, fontWeight: FontWeight.bold)),
+                    const SizedBox(width: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                      decoration: BoxDecoration(color: colorScheme.primaryContainer, borderRadius: BorderRadius.circular(10)),
+                      child: Text('${allSubConvs.length}', style: TextStyle(fontSize: 12, color: colorScheme.onPrimaryContainer)),
+                    ),
+                  ],
+                ),
+              ),
+              ...allSubConvs.map((sub) => Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+                child: Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    onTap: () => _enterSubConversation(sub),
+                    borderRadius: BorderRadius.circular(12),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                      decoration: BoxDecoration(
+                        color: colorScheme.secondaryContainer.withOpacity(0.3),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(Icons.subdirectory_arrow_right, size: 20, color: colorScheme.secondary),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(sub.title, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 14)),
+                                Text('${sub.levelName} · ${sub.messages.length}条', style: TextStyle(fontSize: 12, color: colorScheme.outline)),
+                              ],
+                            ),
+                          ),
+                          IconButton(
+                            icon: Icon(Icons.close, size: 18, color: colorScheme.outline),
+                            onPressed: () async { await SubConversationService.instance.delete(sub.id); setState(() {}); },
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              )),
+              const SizedBox(height: 8),
+            ],
+            
+            // 会话列表
+            Expanded(
+              child: ListView.builder(
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                itemCount: conversations.length,
+                itemBuilder: (context, index) {
+                  final conv = conversations[index];
+                  final isSelected = conv.id == _currentConversation?.id;
+                  final subCount = SubConversationService.instance.getByRootId(conv.id).length;
+                  
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 4),
+                    child: Material(
+                      color: Colors.transparent,
+                      child: InkWell(
+                        onTap: () => _switchConversation(conv),
+                        borderRadius: BorderRadius.circular(12),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                          decoration: BoxDecoration(
+                            color: isSelected ? colorScheme.primaryContainer.withOpacity(0.5) : Colors.transparent,
+                            borderRadius: BorderRadius.circular(12),
+                            border: isSelected ? Border.all(color: colorScheme.primary.withOpacity(0.5)) : null,
+                          ),
+                          child: Row(
+                            children: [
+                              Stack(
+                                children: [
+                                  Icon(Icons.chat_bubble_outline, size: 22, color: isSelected ? colorScheme.primary : colorScheme.outline),
+                                  if (subCount > 0)
+                                    Positioned(
+                                      right: -2, top: -2,
+                                      child: Container(
+                                        padding: const EdgeInsets.all(3),
+                                        decoration: BoxDecoration(color: colorScheme.secondary, shape: BoxShape.circle),
+                                        child: Text('$subCount', style: const TextStyle(fontSize: 8, color: Colors.white)),
+                                      ),
+                                    ),
+                                ],
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(conv.title, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 15, fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal)),
+                                    Text('${conv.messages.length} 条消息', style: TextStyle(fontSize: 12, color: colorScheme.outline)),
+                                  ],
+                                ),
+                              ),
+                              PopupMenuButton(
+                                icon: Icon(Icons.more_vert, size: 20, color: colorScheme.outline),
+                                padding: EdgeInsets.zero,
+                                itemBuilder: (context) => [
+                                  const PopupMenuItem(value: 'rename', child: Row(children: [Icon(Icons.edit, size: 18), SizedBox(width: 8), Text('重命名')])),
+                                  PopupMenuItem(value: 'delete', child: Row(children: [Icon(Icons.delete_outline, size: 18, color: Colors.red), SizedBox(width: 8), Text('删除', style: TextStyle(color: Colors.red))])),
+                                ],
+                                onSelected: (value) {
+                                  if (value == 'rename') _renameConversation(conv);
+                                  else if (value == 'delete') _deleteConversation(conv);
+                                },
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+            
+            // 底部设置按钮
             const Divider(height: 1),
+            Padding(
+              padding: const EdgeInsets.all(12),
+              child: Material(
+                color: Colors.transparent,
+                child: InkWell(
+                  onTap: () async {
+                    Navigator.pop(context);
+                    await Navigator.push(context, MaterialPageRoute(builder: (context) => const SettingsScreen()));
+                    _loadDirectoryTree();
+                  },
+                  borderRadius: BorderRadius.circular(12),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                    decoration: BoxDecoration(
+                      color: colorScheme.surfaceContainerHighest.withOpacity(0.5),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(Icons.settings, color: colorScheme.onSurfaceVariant),
+                        const SizedBox(width: 12),
+                        const Text('设置', style: TextStyle(fontSize: 16)),
+                        const Spacer(),
+                        Icon(Icons.chevron_right, color: colorScheme.outline),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
           ],
-          Expanded(child: ListView.builder(
-            itemCount: conversations.length,
-            itemBuilder: (context, index) {
-              final conv = conversations[index];
-              final isSelected = conv.id == _currentConversation?.id;
-              final subCount = SubConversationService.instance.getByRootId(conv.id).length;
-              return ListTile(
-                selected: isSelected,
-                selectedTileColor: colorScheme.primaryContainer.withOpacity(0.3),
-                leading: Stack(children: [
-                  Icon(Icons.chat_bubble_outline, color: isSelected ? colorScheme.primary : colorScheme.outline),
-                  if (subCount > 0) Positioned(right: 0, top: 0, child: Container(padding: const EdgeInsets.all(2), decoration: BoxDecoration(color: colorScheme.secondary, shape: BoxShape.circle), child: Text('$subCount', style: const TextStyle(fontSize: 8, color: Colors.white)))),
-                ]),
-                title: Text(conv.title, maxLines: 1, overflow: TextOverflow.ellipsis),
-                subtitle: Text('${conv.messages.length} 条消息', style: TextStyle(fontSize: 12, color: colorScheme.outline)),
-                trailing: PopupMenuButton(icon: Icon(Icons.more_vert, color: colorScheme.outline), itemBuilder: (context) => [const PopupMenuItem(value: 'rename', child: Text('重命名')), const PopupMenuItem(value: 'delete', child: Text('删除'))], onSelected: (value) { if (value == 'rename') _renameConversation(conv); else if (value == 'delete') _deleteConversation(conv); }),
-                onTap: () => _switchConversation(conv),
-              );
-            },
-          )),
-        ]),
+        ),
       ),
     );
   }
