@@ -136,7 +136,93 @@ class _MainChatScreenState extends State<MainChatScreen> {
         _isNearBottom = true;
       });
     }
+  }Future<void> _sendAllFiles() async {
+    if (_currentConversation == null) return;
+
+    // 获取所有文件
+    final files = await DatabaseService.instance.getAllFilesWithContent();
+    
+    if (files.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('数据库中没有文件')),
+        );
+      }
+      return;
+    }
+
+    // 确认对话框
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('发送所有文件'),
+        content: Text('确定要发送数据库中的 ${files.length} 个文件给AI吗？'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('发送'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm != true) return;
+
+    // 构建消息内容
+    String displayContent = '【发送所有文件】共 ${files.length} 个文件\n\n【文件目录】\n$_directoryTree';
+    String fullContent = '【发送所有文件】共 ${files.length} 个文件\n\n【文件目录】\n$_directoryTree\n\n【文件内容】\n';
+    
+    List<EmbeddedFile> embeddedFiles = [];
+    
+    // 添加目录作为附件
+    embeddedFiles.add(EmbeddedFile(
+      path: '📁 文件目录.txt',
+      content: _directoryTree,
+      size: _directoryTree.length,
+    ));
+
+    // 添加所有文件
+    for (var file in files) {
+      final path = file['path'] as String;
+      final content = file['content'] as String? ?? '';
+      final size = file['size'] as int? ?? content.length;
+      
+      fullContent += '--- $path ---\n$content\n\n';
+      embeddedFiles.add(EmbeddedFile(
+        path: path,
+        content: content,
+        size: size,
+      ));
+    }
+
+    // 检查是否超过限制
+    int totalTokens = ApiService.estimateTokens(fullContent);
+    if (totalTokens > AppConfig.maxTokens) {
+      displayContent += '\n\n【已超过900K】';
+      fullContent += '\n\n【已超过900K】';
+    }
+
+    // 创建用户消息
+    final userMessage = Message(
+      role: MessageRole.user,
+      content: displayContent,
+      fullContent: fullContent,
+      embeddedFiles: embeddedFiles,
+      status: MessageStatus.sent,
+    );
+    _currentConversation!.messages.add(userMessage);
+    await ConversationService.instance.update(_currentConversation!);
+    setState(() {});
+    _scrollToBottom();
+
+    // 发送给AI
+    await _sendMessageToAI();
   }
+
 
   Future<void> _deleteMessage(int index) async {
     if (_currentConversation == null) return;
@@ -428,6 +514,11 @@ class _MainChatScreenState extends State<MainChatScreen> {
         title: Text(_currentConversation?.title ?? 'AI 对话'),
         centerTitle: true,
         actions: [
+          IconButton(
+            onPressed: _sendAllFiles,
+            icon: const Icon(Icons.upload_file),
+            tooltip: '发送所有文件',
+          ),
           IconButton(
             onPressed: _clearCurrentChat,
             icon: const Icon(Icons.delete_outline),
