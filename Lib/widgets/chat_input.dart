@@ -9,12 +9,16 @@ import 'package:mime/mime.dart';
 
 class ChatInput extends StatefulWidget {
   final Function(String text, List<FileAttachment> attachments) onSend;
+  final VoidCallback? onStop;
   final bool enabled;
+  final bool isGenerating;
 
   const ChatInput({
     super.key,
     required this.onSend,
+    this.onStop,
     this.enabled = true,
+    this.isGenerating = false,
   });
 
   @override
@@ -54,7 +58,6 @@ class _ChatInputState extends State<ChatInput> {
           final fileInfo = File(file.path!);
           final mimeType = lookupMimeType(file.path!) ?? 'application/octet-stream';
           
-          // 读取文件内容（仅文本文件）
           String? content;
           if (mimeType.startsWith('text/') || 
               mimeType.contains('json') || 
@@ -136,6 +139,7 @@ class _ChatInputState extends State<ChatInput> {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    final canSend = widget.enabled && (_controller.text.trim().isNotEmpty || _attachments.isNotEmpty);
 
     return Container(
       decoration: BoxDecoration(
@@ -152,49 +156,81 @@ class _ChatInputState extends State<ChatInput> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            // 附件预览
+            // 附件预览区域（包含图片缩略图）
             if (_attachments.isNotEmpty)
               Container(
-                height: 70,
+                height: 80,
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                 child: ListView.builder(
                   scrollDirection: Axis.horizontal,
                   itemCount: _attachments.length,
                   itemBuilder: (context, index) {
                     final attachment = _attachments[index];
+                    final isImage = attachment.mimeType.startsWith('image/');
+                    
                     return Container(
                       margin: const EdgeInsets.only(right: 8),
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                      decoration: BoxDecoration(
-                        color: colorScheme.primaryContainer.withOpacity(0.5),
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
+                      child: Stack(
                         children: [
-                          Icon(
-                            attachment.mimeType.startsWith('image/')
-                                ? Icons.image
-                               : Icons.insert_drive_file,
-                            size: 20,
-                            color: colorScheme.primary,
-                          ),
-                          const SizedBox(width: 6),
-                          ConstrainedBox(
-                            constraints: const BoxConstraints(maxWidth: 100),
-                            child: Text(
-                              attachment.name,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(fontSize: 12),
+                          if (isImage)
+                            // 图片缩略图
+                            ClipRRect(
+                              borderRadius: BorderRadius.circular(8),
+                              child: Image.file(
+                                File(attachment.path),
+                                width: 64,
+                                height: 64,
+                                fit: BoxFit.cover,
+                                errorBuilder: (ctx, err, stack) => Container(
+                                  width: 64,
+                                  height: 64,
+                                  decoration: BoxDecoration(
+                                    color: colorScheme.primaryContainer.withOpacity(0.5),
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  child: Icon(Icons.broken_image, color: colorScheme.primary),
+                                ),
+                              ),
+                            )
+                          else
+                            // 普通文件
+                            Container(
+                              width: 64,
+                              height: 64,
+                              padding: const EdgeInsets.all(8),
+                              decoration: BoxDecoration(
+                                color: colorScheme.primaryContainer.withOpacity(0.5),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Column(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Icon(Icons.insert_drive_file, size: 24, color: colorScheme.primary),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    attachment.name,
+                                    style: const TextStyle(fontSize: 9),
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis,
+                                    textAlign: TextAlign.center,
+                                  ),
+                                ],
+                              ),
                             ),
-                          ),
-                          const SizedBox(width: 6),
-                          GestureDetector(
-                            onTap: () => _removeAttachment(index),
-                            child: Icon(
-                              Icons.close,
-                              size: 18,
-                              color: colorScheme.error,
+                          // 删除按钮
+                          Positioned(
+                            top: -4,
+                            right: -4,
+                            child: GestureDetector(
+                              onTap: () => _removeAttachment(index),
+                              child: Container(
+                                padding: const EdgeInsets.all(4),
+                                decoration: BoxDecoration(
+                                  color: colorScheme.error,
+                                  shape: BoxShape.circle,
+                                ),
+                                child: const Icon(Icons.close, size: 12, color: Colors.white),
+                              ),
                             ),
                           ),
                         ],
@@ -203,31 +239,20 @@ class _ChatInputState extends State<ChatInput> {
                   },
                 ),
               ),
-            // 输入区域
+            
+            // 输入框区域
             Padding(
-              padding: const EdgeInsets.all(12),
+              padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
-                  // 添加文件按钮
-                  IconButton(
-                    onPressed: widget.enabled ? _pickFiles : null,
-                    icon: const Icon(Icons.attach_file),
-                    tooltip: '添加文件',
-                  ),
-                  // 添加图片按钮
-                  IconButton(
-                    onPressed: widget.enabled ? _pickImage : null,
-                    icon: const Icon(Icons.image),
-                    tooltip: '添加图片',
-                  ),
                   // 输入框
                   Expanded(
                     child: Container(
-                      constraints: const BoxConstraints(maxHeight: 120),
+                      constraints: const BoxConstraints(minHeight: 48, maxHeight: 150),
                       decoration: BoxDecoration(
-                        color: colorScheme.surfaceVariant.withOpacity(0.5),
-                        borderRadius: BorderRadius.circular(20),
+                        color: colorScheme.surfaceContainerHighest.withOpacity(0.5),
+                        borderRadius: BorderRadius.circular(24),
                       ),
                       child: TextField(
                         controller: _controller,
@@ -238,24 +263,53 @@ class _ChatInputState extends State<ChatInput> {
                         decoration: const InputDecoration(
                           hintText: '输入消息...',
                           border: InputBorder.none,
-                          contentPadding: EdgeInsets.symmetric(
-                            horizontal: 16,
-                            vertical: 10,
-                          ),
+                          contentPadding: EdgeInsets.symmetric(horizontal: 20, vertical: 14),
                         ),
                         onChanged: (_) => setState(() {}),
                       ),
                     ),
                   ),
                   const SizedBox(width: 8),
-                  // 发送按钮
-                  IconButton.filled(
-                    onPressed: widget.enabled &&
-                            (_controller.text.trim().isNotEmpty ||
-                                _attachments.isNotEmpty)
-                        ? _send
-                        : null,
-                    icon: const Icon(Icons.send),
+                  // 发送/暂停按钮
+                  widget.isGenerating
+                      ? IconButton.filled(
+                          onPressed: widget.onStop,
+                          style: IconButton.styleFrom(
+                            backgroundColor: colorScheme.error,
+                          ),
+                          icon: const Icon(Icons.stop, color: Colors.white),
+                        )
+                      : IconButton.filled(
+                          onPressed: canSend ? _send : null,
+                          icon: const Icon(Icons.send),
+                        ),
+                ],
+              ),
+            ),
+            
+            // 底部按钮区域
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+              child: Row(
+                children: [
+                  // 添加文件按钮
+                  TextButton.icon(
+                    onPressed: widget.enabled && !widget.isGenerating ? _pickFiles : null,
+                    icon: Icon(Icons.attach_file, size: 20, color: colorScheme.primary),
+                    label: Text('文件', style: TextStyle(color: colorScheme.primary)),
+                    style: TextButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  // 添加图片按钮
+                  TextButton.icon(
+                    onPressed: widget.enabled && !widget.isGenerating ? _pickImage : null,
+                    icon: Icon(Icons.image, size: 20, color: colorScheme.primary),
+                    label: Text('图片', style: TextStyle(color: colorScheme.primary)),
+                    style: TextButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    ),
                   ),
                 ],
               ),
