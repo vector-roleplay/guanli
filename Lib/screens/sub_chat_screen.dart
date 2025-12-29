@@ -39,6 +39,7 @@ class _SubChatScreenState extends State<SubChatScreen> {
   
   late SubConversation _subConversation;
   bool _isLoading = false;
+  bool _stopRequested = false;
   
   bool _userScrolling = false;
   bool _showScrollButtons = false;
@@ -438,7 +439,14 @@ class _SubChatScreenState extends State<SubChatScreen> {
     await _requestAIResponse();
   }
 
+  void _stopGeneration() {
+    setState(() {
+      _stopRequested = true;
+    });
+  }
+
   Future<void> _requestAIResponse() async {
+    _stopRequested = false;
     final aiMessage = Message(
       role: MessageRole.assistant,
       content: '',
