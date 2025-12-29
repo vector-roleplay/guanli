@@ -23,30 +23,13 @@ class FileAttachmentData {
   }
 }
 
-class FileAttachmentView extends StatefulWidget {
+class FileAttachmentView extends StatelessWidget {
   final List<FileAttachmentData> files;
 
   const FileAttachmentView({
     super.key,
     required this.files,
   });
-
-  @override
-  State<FileAttachmentView> createState() => _FileAttachmentViewState();
-}
-
-class _FileAttachmentViewState extends State<FileAttachmentView> {
-  Set<int> _expandedIndices = {};
-
-  void _toggleExpand(int index) {
-    setState(() {
-      if (_expandedIndices.contains(index)) {
-        _expandedIndices.remove(index);
-      } else {
-        _expandedIndices.add(index);
-      }
-    });
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -56,7 +39,7 @@ class _FileAttachmentViewState extends State<FileAttachmentView> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          '📎 附带文件 (${widget.files.length}个)',
+          '📎 附带文件 (${files.length}个)',
           style: TextStyle(
             fontSize: 12,
             fontWeight: FontWeight.bold,
@@ -64,99 +47,64 @@ class _FileAttachmentViewState extends State<FileAttachmentView> {
           ),
         ),
         const SizedBox(height: 8),
-        ...widget.files.asMap().entries.map((entry) {
-          final index = entry.key;
-          final file = entry.value;
-          final isExpanded = _expandedIndices.contains(index);
-
-          return Container(
-            margin: const EdgeInsets.only(bottom: 8),
-            decoration: BoxDecoration(
-              color: colorScheme.surfaceContainerHighest.withOpacity(0.5),
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: colorScheme.outline.withOpacity(0.3)),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // 文件头部
-                InkWell(
-                  onTap: () => _toggleExpand(index),
-                  borderRadius: BorderRadius.circular(8),
-                  child: Padding(
-                    padding: const EdgeInsets.all(10),
-                    child: Row(
-                      children: [
-                        Icon(
-                          isExpanded ? Icons.expand_less : Icons.expand_more,
-                          size: 20,
-                          color: colorScheme.primary,
-                        ),
-                        const SizedBox(width: 8),
-                        Icon(
-                          _getFileIcon(file.fileName),
-                          size: 18,
-                          color: colorScheme.primary,
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            file.fileName,
-                            style: const TextStyle(fontWeight: FontWeight.w500),
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                        Text(
-                          file.formattedSize,
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: colorScheme.outline,
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        GestureDetector(
-                          onTap: () {
-                            Clipboard.setData(ClipboardData(text: file.content));
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                content: Text('文件内容已复制'),
-                                duration: Duration(seconds: 1),
-                              ),
-                            );
-                          },
-                          child: Icon(
-                            Icons.copy,
-                            size: 18,
-                            color: colorScheme.outline,
-                          ),
-                        ),
-                      ],
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: files.map((file) {
+            return Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              decoration: BoxDecoration(
+                color: colorScheme.surfaceContainerHighest.withOpacity(0.5),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: colorScheme.outline.withOpacity(0.3)),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    _getFileIcon(file.fileName),
+                    size: 18,
+                    color: colorScheme.primary,
+                  ),
+                  const SizedBox(width: 8),
+                  ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 150),
+                    child: Text(
+                      file.fileName,
+                      style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
+                      overflow: TextOverflow.ellipsis,
                     ),
                   ),
-                ),
-                // 展开的内容
-                if (isExpanded) ...[
-                  const Divider(height: 1),
-                  Container(
-                    width: double.infinity,
-                    constraints: const BoxConstraints(maxHeight: 300),
-                    padding: const EdgeInsets.all(10),
-                    child: SingleChildScrollView(
-                      child: SelectableText(
-                        file.content,
-                        style: TextStyle(
-                          fontSize: 12,
-                          fontFamily: 'monospace',
-                          color: colorScheme.onSurfaceVariant,
+                  const SizedBox(width: 8),
+                  Text(
+                    file.formattedSize,
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: colorScheme.outline,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  GestureDetector(
+                    onTap: () {
+                      Clipboard.setData(ClipboardData(text: file.content));
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('文件内容已复制'),
+                          duration: Duration(seconds: 1),
                         ),
-                      ),
+                      );
+                    },
+                    child: Icon(
+                      Icons.copy,
+                      size: 16,
+                      color: colorScheme.outline,
                     ),
                   ),
                 ],
-              ],
-            ),
-          );
-        }),
+              ),
+            );
+          }).toList(),
+        ),
       ],
     );
   }
