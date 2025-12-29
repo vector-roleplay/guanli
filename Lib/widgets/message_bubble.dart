@@ -1,7 +1,8 @@
-// lib/widgets/message_bubble.dart
+// Lib/widgets/message_bubble.dart
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_markdown/flutter_markdown.dart';
 import '../models/message.dart';
 import 'file_attachment_view.dart';
 import 'code_block.dart';
@@ -27,94 +28,84 @@ class MessageBubble extends StatefulWidget {
 class _MessageBubbleState extends State<MessageBubble> {
   bool _thinkingExpanded = false;
 
-    @override
+  @override
   Widget build(BuildContext context) {
     final isUser = widget.message.role == MessageRole.user;
     final colorScheme = Theme.of(context).colorScheme;
 
-    return Align(
-      alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
-      child: Container(
-        constraints: BoxConstraints(
-          maxWidth: MediaQuery.of(context).size.width * 0.85,
-        ),
-        margin: EdgeInsets.only(
-          left: isUser ? 50 : 12,
-          right: isUser ? 12 : 50,
-          top: 6,
-          bottom: 6,
-        ),
-        child: Column(
-          crossAxisAlignment:
-              isUser ? CrossAxisAlignment.end : CrossAxisAlignment.start,
-          children: [
-            Padding(
-              padding: const EdgeInsets.only(bottom: 4, left: 4, right: 4),
-              child: Text(
-                isUser ? '你' : 'AI',
-                style: TextStyle(fontSize: 12, color: colorScheme.outline),
-              ),
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // 角色标签
+          Padding(
+            padding: const EdgeInsets.only(bottom: 4, left: 4),
+            child: Text(
+              isUser ? '你' : 'AI',
+              style: TextStyle(fontSize: 12, color: colorScheme.outline),
             ),
-            GestureDetector(
-              onLongPress: () => _showOptions(context),
-              child: Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: isUser
-                      ? colorScheme.primaryContainer
-                      : colorScheme.surfaceContainerHighest,
-                  borderRadius: BorderRadius.circular(16),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // 普通附件
-                    if (widget.message.attachments.isNotEmpty) ...[
-                      _buildAttachments(context),
-                      const SizedBox(height: 8),
-                    ],
-                    // 消息内容
-                    if (widget.message.content.isNotEmpty)
-                      _buildContent(context),
-                    // 内嵌文件（折叠展示）
-                    if (widget.message.embeddedFiles.isNotEmpty) ...[
-                      const SizedBox(height: 12),
-                      FileAttachmentView(
-                        files: widget.message.embeddedFiles
-                            .map((f) => FileAttachmentData(
-                                  path: f.path,
-                                  content: f.content,
-                                  size: f.size,
-                                ))
-                            .toList(),
+          ),
+          // 消息内容
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: isUser
+                  ? colorScheme.primaryContainer
+                  : colorScheme.surfaceContainerHighest,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // 普通附件
+                if (widget.message.attachments.isNotEmpty) ...[
+                  _buildAttachments(context),
+                  const SizedBox(height: 8),
+                ],
+                // 消息内容
+                if (widget.message.content.isNotEmpty)
+                  _buildContent(context),
+                // 内嵌文件
+                if (widget.message.embeddedFiles.isNotEmpty) ...[
+                  const SizedBox(height: 12),
+                  FileAttachmentView(
+                    files: widget.message.embeddedFiles
+                        .map((f) => FileAttachmentData(
+                              path: f.path,
+                              content: f.content,
+                              size: f.size,
+                            ))
+                        .toList(),
+                  ),
+                ],
+                // 发送中状态
+                if (widget.message.status == MessageStatus.sending)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: colorScheme.primary,
                       ),
-                    ],
-                    // 发送中状态
-                    if (widget.message.status == MessageStatus.sending)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 8),
-                        child: SizedBox(
-                          width: 16,
-                          height: 16,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: colorScheme.primary,
-                          ),
-                        ),
-                      ),
-                    // 错误状态
-                    if (widget.message.status == MessageStatus.error)
-                      _buildError(context),
-                  ],
-                ),
-              ),
+                    ),
+                  ),
+                // 错误状态
+                if (widget.message.status == MessageStatus.error)
+                  _buildError(context),
+              ],
             ),
-            Padding(
-              padding: const EdgeInsets.only(top: 4, left: 4, right: 4),
-              child: _buildFooter(context),
-            ),
-          ],
-        ),
+          ),
+          // 底部信息栏 + 操作按钮
+          Padding(
+            padding: const EdgeInsets.only(top: 6, left: 4, right: 4),
+            child: _buildFooter(context),
+          ),
+        ],
       ),
     );
   }
@@ -182,7 +173,6 @@ class _MessageBubbleState extends State<MessageBubble> {
                         color: colorScheme.onSurfaceVariant.withOpacity(0.8),
                         fontStyle: FontStyle.italic,
                       ),
-                      contextMenuBuilder: _buildChineseContextMenu,
                     ),
                   ],
                 ],
@@ -190,117 +180,134 @@ class _MessageBubbleState extends State<MessageBubble> {
             ),
           ),
           if (mainContent.isNotEmpty)
-            _buildSelectableText(context, mainContent),
+            _buildMarkdownContent(context, mainContent),
         ],
       );
     }
 
-    return _buildSelectableText(context, content);
+    return _buildMarkdownContent(context, content);
   }
 
-  Widget _buildSelectableText(BuildContext context, String content) {
-  final isUser = widget.message.role == MessageRole.user;
-  final colorScheme = Theme.of(context).colorScheme;
+  Widget _buildMarkdownContent(BuildContext context, String content) {
+    final isUser = widget.message.role == MessageRole.user;
+    final colorScheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
 
-  // 解析代码块
-  final codeBlockRegex = RegExp(r'```(\w*)\n?([\s\S]*?)```');
-  final matches = codeBlockRegex.allMatches(content).toList();
+    // 检查是否包含代码块
+    if (content.contains('```')) {
+      return _buildContentWithCodeBlocks(context, content);
+    }
 
-  if (matches.isEmpty) {
-    // 没有代码块，直接显示文本
-    return SelectableText(
-      content,
-      style: TextStyle(
-        color: isUser ? colorScheme.onPrimaryContainer : colorScheme.onSurfaceVariant,
+    // 使用 Markdown 渲染
+    return MarkdownBody(
+      data: content,
+      selectable: true,
+      styleSheet: MarkdownStyleSheet(
+        p: TextStyle(
+          color: isUser ? colorScheme.onPrimaryContainer : colorScheme.onSurfaceVariant,
+          fontSize: 15,
+        ),
+        h1: TextStyle(
+          color: isUser ? colorScheme.onPrimaryContainer : colorScheme.onSurfaceVariant,
+          fontSize: 22,
+          fontWeight: FontWeight.bold,
+        ),
+        h2: TextStyle(
+          color: isUser ? colorScheme.onPrimaryContainer : colorScheme.onSurfaceVariant,
+          fontSize: 20,
+          fontWeight: FontWeight.bold,
+        ),
+        h3: TextStyle(
+          color: isUser ? colorScheme.onPrimaryContainer : colorScheme.onSurfaceVariant,
+          fontSize: 18,
+          fontWeight: FontWeight.bold,
+        ),
+        strong: TextStyle(
+          color: isUser ? colorScheme.onPrimaryContainer : colorScheme.onSurfaceVariant,
+          fontWeight: FontWeight.bold,
+        ),
+        em: TextStyle(
+          color: isUser ? colorScheme.onPrimaryContainer : colorScheme.onSurfaceVariant,
+          fontStyle: FontStyle.italic,
+        ),
+        tableHead: TextStyle(
+          color: isUser ? colorScheme.onPrimaryContainer : colorScheme.onSurfaceVariant,
+          fontWeight: FontWeight.bold,
+        ),
+        tableBody: TextStyle(
+          color: isUser ? colorScheme.onPrimaryContainer : colorScheme.onSurfaceVariant,
+        ),
+        tableBorder: TableBorder.all(
+          color: colorScheme.outline.withOpacity(0.5),
+          width: 1,
+        ),
+        tableColumnWidth: const IntrinsicColumnWidth(),
+        tableCellsPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        blockquote: TextStyle(
+          color: colorScheme.outline,
+          fontStyle: FontStyle.italic,
+        ),
+        blockquoteDecoration: BoxDecoration(
+          border: Border(
+            left: BorderSide(color: colorScheme.primary, width: 3),
+          ),
+        ),
+        blockquotePadding: const EdgeInsets.only(left: 12),
+        code: TextStyle(
+          backgroundColor: isDark ? const Color(0xFF2D2D2D) : const Color(0xFFE8E8E8),
+          fontFamily: 'monospace',
+          fontSize: 13,
+        ),
+        codeblockDecoration: BoxDecoration(
+          color: isDark ? const Color(0xFF1E1E1E) : const Color(0xFFF5F5F5),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        listBullet: TextStyle(
+          color: isUser ? colorScheme.onPrimaryContainer : colorScheme.onSurfaceVariant,
+        ),
       ),
-      contextMenuBuilder: _buildChineseContextMenu,
     );
   }
 
-  // 有代码块，分段显示
-  List<Widget> widgets = [];
-  int lastEnd = 0;
+  Widget _buildContentWithCodeBlocks(BuildContext context, String content) {
+    final isUser = widget.message.role == MessageRole.user;
+    final colorScheme = Theme.of(context).colorScheme;
 
-  for (var match in matches) {
-    // 代码块之前的文本
-    if (match.start > lastEnd) {
-      final textBefore = content.substring(lastEnd, match.start).trim();
-      if (textBefore.isNotEmpty) {
-        widgets.add(
-          SelectableText(
-            textBefore,
-            style: TextStyle(
-              color: isUser ? colorScheme.onPrimaryContainer : colorScheme.onSurfaceVariant,
-            ),
-            contextMenuBuilder: _buildChineseContextMenu,
-          ),
-        );
+    final codeBlockRegex = RegExp(r'```(\w*)\n?([\s\S]*?)```');
+    final matches = codeBlockRegex.allMatches(content).toList();
+
+    if (matches.isEmpty) {
+      return _buildMarkdownContent(context, content);
+    }
+
+    List<Widget> widgets = [];
+    int lastEnd = 0;
+
+    for (var match in matches) {
+      if (match.start > lastEnd) {
+        final textBefore = content.substring(lastEnd, match.start).trim();
+        if (textBefore.isNotEmpty) {
+          widgets.add(_buildMarkdownContent(context, textBefore));
+        }
+      }
+
+      final language = match.group(1) ?? '';
+      final code = match.group(2) ?? '';
+      widgets.add(CodeBlock(code: code.trim(), language: language.isEmpty ? null : language));
+
+      lastEnd = match.end;
+    }
+
+    if (lastEnd < content.length) {
+      final textAfter = content.substring(lastEnd).trim();
+      if (textAfter.isNotEmpty) {
+        widgets.add(_buildMarkdownContent(context, textAfter));
       }
     }
 
-    // 代码块
-    final language = match.group(1) ?? '';
-    final code = match.group(2) ?? '';
-    widgets.add(CodeBlock(code: code.trim(), language: language.isEmpty ? null : language));
-
-    lastEnd = match.end;
-  }
-
-  // 代码块之后的文本
-  if (lastEnd < content.length) {
-    final textAfter = content.substring(lastEnd).trim();
-    if (textAfter.isNotEmpty) {
-      widgets.add(
-        SelectableText(
-          textAfter,
-          style: TextStyle(
-            color: isUser ? colorScheme.onPrimaryContainer : colorScheme.onSurfaceVariant,
-          ),
-          contextMenuBuilder: _buildChineseContextMenu,
-        ),
-      );
-    }
-  }
-
-  return Column(
-    crossAxisAlignment: CrossAxisAlignment.start,
-    children: widgets,
-  );
-}
-
-  Widget _buildChineseContextMenu(BuildContext context, EditableTextState editableTextState) {
-    final List<ContextMenuButtonItem> buttonItems = [];
-
-    if (editableTextState.copyEnabled) {
-      buttonItems.add(ContextMenuButtonItem(
-        label: '复制',
-        onPressed: () => editableTextState.copySelection(SelectionChangedCause.toolbar),
-      ));
-    }
-
-    if (editableTextState.selectAllEnabled) {
-      buttonItems.add(ContextMenuButtonItem(
-        label: '全选',
-        onPressed: () => editableTextState.selectAll(SelectionChangedCause.toolbar),
-      ));
-    }
-
-    buttonItems.add(ContextMenuButtonItem(
-      label: '分享',
-      onPressed: () {
-        final text = editableTextState.textEditingValue.selection
-            .textInside(editableTextState.textEditingValue.text);
-        Clipboard.setData(ClipboardData(text: text));
-        editableTextState.hideToolbar();
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('已复制'), duration: Duration(seconds: 1)),
-        );
-      },
-    ));
-
-    return AdaptiveTextSelectionToolbar.buttonItems(
-      anchors: editableTextState.contextMenuAnchors,
-      buttonItems: buttonItems,
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: widgets,
     );
   }
 
@@ -332,23 +339,100 @@ class _MessageBubbleState extends State<MessageBubble> {
   Widget _buildFooter(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     final usage = widget.message.tokenUsage;
-    
-    return Wrap(
-      spacing: 12,
+    final isAI = widget.message.role == MessageRole.assistant;
+    final isSent = widget.message.status == MessageStatus.sent;
+
+    return Row(
       children: [
-        if (widget.message.role == MessageRole.assistant && usage != null) ...[
-          _buildTokenChip('↑ ${_formatNumber(usage.promptTokens)}', colorScheme.outline.withOpacity(0.7)),
-          _buildTokenChip('↓ ${_formatNumber(usage.completionTokens)}', colorScheme.outline.withOpacity(0.7)),
-          if (usage.tokensPerSecond > 0)
-            _buildTokenChip('⚡${usage.tokensPerSecond.toStringAsFixed(1)}/s', colorScheme.outline.withOpacity(0.7)),
-          if (usage.duration > 0)
-            _buildTokenChip('⏱${usage.duration.toStringAsFixed(1)}s', colorScheme.outline.withOpacity(0.7)),
-        ],
-        Text(
-          _formatTime(widget.message.timestamp),
-          style: TextStyle(fontSize: 10, color: colorScheme.outline.withOpacity(0.6)),
+        // Token 信息
+        Expanded(
+          child: Wrap(
+            spacing: 12,
+            children: [
+              if (isAI && usage != null) ...[
+                _buildTokenChip('↑ ${_formatNumber(usage.promptTokens)}', colorScheme.outline.withOpacity(0.7)),
+                _buildTokenChip('↓ ${_formatNumber(usage.completionTokens)}', colorScheme.outline.withOpacity(0.7)),
+                if (usage.tokensPerSecond > 0)
+                  _buildTokenChip('⚡${usage.tokensPerSecond.toStringAsFixed(1)}/s', colorScheme.outline.withOpacity(0.7)),
+                if (usage.duration > 0)
+                  _buildTokenChip('⏱${usage.duration.toStringAsFixed(1)}s', colorScheme.outline.withOpacity(0.7)),
+              ],
+              Text(
+                _formatTime(widget.message.timestamp),
+                style: TextStyle(fontSize: 10, color: colorScheme.outline.withOpacity(0.6)),
+              ),
+            ],
+          ),
         ),
+        // 操作按钮
+        if (isSent) ...[
+          _buildActionButton(
+            icon: Icons.copy,
+            onTap: () {
+              Clipboard.setData(ClipboardData(text: widget.message.content));
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('已复制'), duration: Duration(seconds: 1)),
+              );
+            },
+            colorScheme: colorScheme,
+          ),
+          if (isAI && widget.onRegenerate != null)
+            _buildActionButton(
+              icon: Icons.refresh,
+              onTap: widget.onRegenerate!,
+              colorScheme: colorScheme,
+            ),
+          if (widget.onDelete != null)
+            _buildActionButton(
+              icon: Icons.delete_outline,
+              onTap: () => _confirmDelete(context),
+              colorScheme: colorScheme,
+              isDestructive: true,
+            ),
+        ],
       ],
+    );
+  }
+
+  Widget _buildActionButton({
+    required IconData icon,
+    required VoidCallback onTap,
+    required ColorScheme colorScheme,
+    bool isDestructive = false,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+        child: Icon(
+          icon,
+          size: 18,
+          color: isDestructive ? colorScheme.error.withOpacity(0.7) : colorScheme.outline.withOpacity(0.7),
+        ),
+      ),
+    );
+  }
+
+  void _confirmDelete(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('删除消息'),
+        content: const Text('确定要删除这条消息吗？'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context);
+              widget.onDelete?.call();
+            },
+            child: Text('删除', style: TextStyle(color: Theme.of(context).colorScheme.error)),
+          ),
+        ],
+      ),
     );
   }
 
@@ -383,73 +467,6 @@ class _MessageBubbleState extends State<MessageBubble> {
           ),
         );
       }).toList(),
-    );
-  }
-
-  void _showOptions(BuildContext context) {
-  final isAssistant = widget.message.role == MessageRole.assistant;
-  
-  showModalBottomSheet(
-    context: context,
-    builder: (context) => SafeArea(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          ListTile(
-            leading: const Icon(Icons.copy),
-            title: const Text('复制全部'),
-            onTap: () {
-              Clipboard.setData(ClipboardData(text: widget.message.content));
-              Navigator.pop(context);
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('已复制'), duration: Duration(seconds: 1)),
-              );
-            },
-          ),
-          if (isAssistant && widget.onRegenerate != null)
-            ListTile(
-              leading: const Icon(Icons.refresh),
-              title: const Text('重新生成'),
-              onTap: () {
-                Navigator.pop(context);
-                widget.onRegenerate?.call();
-              },
-            ),
-          if (widget.onDelete != null)
-            ListTile(
-              leading: Icon(Icons.delete_outline, color: Theme.of(context).colorScheme.error),
-              title: Text('删除此消息', style: TextStyle(color: Theme.of(context).colorScheme.error)),
-              onTap: () {
-                Navigator.pop(context);
-                _confirmDelete(context);
-              },
-            ),
-        ],
-      ),
-    ),
-  );
-  }
-
-  void _confirmDelete(BuildContext context) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('删除消息'),
-        content: const Text('确定要删除这条消息吗？'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('取消'),
-          ),
-          TextButton(
-            onPressed: () {
-              Navigator.pop(context);
-              widget.onDelete?.call();
-            },
-            child: Text('删除', style: TextStyle(color: Theme.of(context).colorScheme.error)),
-          ),
-        ],
-      ),
     );
   }
 
