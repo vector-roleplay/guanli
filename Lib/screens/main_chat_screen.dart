@@ -33,6 +33,7 @@ class _MainChatScreenState extends State<MainChatScreen> {
   String _directoryTree = '';
   Conversation? _currentConversation;
   bool _isLoading = false;
+  bool _stopRequested = false;
   
   bool _userScrolling = false;
   bool _showScrollButtons = false;
@@ -240,8 +241,15 @@ class _MainChatScreenState extends State<MainChatScreen> {
     await _sendMessageToAI();
   }
 
+  void _stopGeneration() {
+    setState(() {
+      _stopRequested = true;
+    });
+  }
+
   Future<void> _sendMessageToAI() async {
     if (_currentConversation == null) return;
+    _stopRequested = false;
     final aiMessage = Message(role: MessageRole.assistant, content: '', status: MessageStatus.sending);
     _currentConversation!.messages.add(aiMessage);
     setState(() => _isLoading = true);
