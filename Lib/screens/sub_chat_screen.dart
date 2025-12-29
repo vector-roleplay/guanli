@@ -1,5 +1,6 @@
-// lib/screens/sub_chat_screen.dart
+// Lib/screens/sub_chat_screen.dart
 
+import 'dart:async';
 import 'package:flutter/material.dart';
 import '../models/message.dart';
 import '../models/sub_conversation.dart';
@@ -8,6 +9,7 @@ import '../services/file_service.dart';
 import '../services/sub_conversation_service.dart';
 import '../widgets/message_bubble.dart';
 import '../widgets/chat_input.dart';
+import '../widgets/scroll_buttons.dart';
 import '../utils/message_detector.dart';
 import '../config/app_config.dart';
 
@@ -41,6 +43,9 @@ class _SubChatScreenState extends State<SubChatScreen> {
   bool _userScrolling = false;
   bool _showScrollButtons = false;
   bool _isNearBottom = true;
+  Timer? _hideButtonsTimer;
+  
+  final Map<int, GlobalKey> _messageKeys = {};
 
   @override
   void initState() {
@@ -68,15 +73,23 @@ class _SubChatScreenState extends State<SubChatScreen> {
       });
     }
     
-    if (!_showScrollButtons) {
-      setState(() {
-        _showScrollButtons = true;
-      });
-    }
+    setState(() {
+      _showScrollButtons = true;
+    });
+    
+    _hideButtonsTimer?.cancel();
+    _hideButtonsTimer = Timer(const Duration(seconds: 1), () {
+      if (mounted) {
+        setState(() {
+          _showScrollButtons = false;
+        });
+      }
+    });
   }
 
   @override
   void dispose() {
+    _hideButtonsTimer?.cancel();
     _scrollController.removeListener(_onScroll);
     _scrollController.dispose();
     super.dispose();
@@ -117,6 +130,62 @@ class _SubChatScreenState extends State<SubChatScreen> {
         _isNearBottom = true;
       });
     }
+  }
+
+  void _scrollToPreviousMessage() {
+    if (!_scrollController.hasClients) return;
+    
+    final currentOffset = _scrollController.offset;
+    double targetOffset = 0;
+    
+    for (int i = _subConversation.messages.length - 1; i >= 0; i--) {
+      final key = _messageKeys[i];
+      if (key?.currentContext != null) {
+        final box = key!.currentContext!.findRenderObject() as RenderBox?;
+        if (box != null) {
+          final position = box.localToGlobal(Offset.zero);
+          final scrollPosition = _scrollController.offset + position.dy - 100;
+          if (scrollPosition < currentOffset - 10) {
+            targetOffset = scrollPosition.clamp(0.0, _scrollController.position.maxScrollExtent);
+            break;
+          }
+        }
+      }
+    }
+    
+    _scrollController.animateTo(
+      targetOffset,
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeOut,
+    );
+  }
+
+  void _scrollToNextMessage() {
+    if (!_scrollController.hasClients) return;
+    
+    final currentOffset = _scrollController.offset;
+    double targetOffset = _scrollController.position.maxScrollExtent;
+    
+    for (int i = 0; i < _subConversation.messages.length; i++) {
+      final key = _messageKeys[i];
+      if (key?.currentContext != null) {
+        final box = key!.currentContext!.findRenderObject() as RenderBox?;
+        if (box != null) {
+          final position = box.localToGlobal(Offset.zero);
+          final scrollPosition = _scrollController.offset + position.dy - 100;
+          if (scrollPosition > currentOffset + 10) {
+            targetOffset = scrollPosition.clamp(0.0, _scrollController.position.maxScrollExtent);
+            break;
+          }
+        }
+      }
+    }
+    
+    _scrollController.animateTo(
+      targetOffset,
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeOut,
+    );
   }
 
   Future<void> _initializeChat() async {
@@ -524,12 +593,14 @@ class _SubChatScreenState extends State<SubChatScreen> {
 
   Future<void> _deleteMessage(int index) async {
     _subConversation.messages.removeAt(index);
+    _messageKeys.remove(index);
     await SubConversationService.instance.update(_subConversation);
     setState(() {});
   }
 
   Future<void> _regenerateMessage(int aiMessageIndex) async {
     _subConversation.messages.removeAt(aiMessageIndex);
+    _messageKeys.remove(aiMessageIndex);
     await SubConversationService.instance.update(_subConversation);
     setState(() {});
     await _requestAIResponse();
@@ -604,16 +675,20 @@ class _SubChatScreenState extends State<SubChatScreen> {
                           padding: const EdgeInsets.symmetric(vertical: 16),
                           itemCount: _subConversation.messages.length,
                           itemBuilder: (context, index) {
+                            _messageKeys[index] ??= GlobalKey();
                             final message = _subConversation.messages[index];
-                            return MessageBubble(
-                              message: message,
-                              onRetry: message.status == MessageStatus.error
-                                  ? () => _sendMessage(message.content, message.attachments)
-                                  : null,
-                              onDelete: () => _deleteMessage(index),
-                              onRegenerate: message.role == MessageRole.assistant && message.status == MessageStatus.sent
-                                  ? () => _regenerateMessage(index)
-                                  : null,
+                            return Container(
+                              key: _messageKeys[index],
+                              child: MessageBubble(
+                                message: message,
+                                onRetry: message.status == MessageStatus.error
+                                    ? () => _sendMessage(message.content, message.attachments)
+                                    : null,
+                                onDelete: () => _deleteMessage(index),
+                                onRegenerate: message.role == MessageRole.assistant && message.status == MessageStatus.sent
+                                    ? () => _regenerateMessage(index)
+                                    : null,
+                              ),
                             );
                           },
                         ),
@@ -627,25 +702,13 @@ class _SubChatScreenState extends State<SubChatScreen> {
           ),
           if (_showScrollButtons && hasMessages)
             Positioned(
-              right: 16,
+              right: 12,
               bottom: 80,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  FloatingActionButton.small(
-                    heroTag: 'subScrollTop',
-                    onPressed: _scrollToTop,
-                    backgroundColor: colorScheme.secondaryContainer,
-                    child: Icon(Icons.keyboard_arrow_up, color: colorScheme.onSecondaryContainer),
-                  ),
-                  const SizedBox(height: 8),
-                  FloatingActionButton.small(
-                    heroTag: 'subScrollBottom',
-                    onPressed: _forceScrollToBottom,
-                    backgroundColor: colorScheme.primaryContainer,
-                    child: Icon(Icons.keyboard_arrow_down, color: colorScheme.onPrimaryContainer),
-                  ),
-                ],
+              child: ScrollButtons(
+                onScrollToTop: _scrollToTop,
+                onScrollToBottom: _forceScrollToBottom,
+                onPreviousMessage: _scrollToPreviousMessage,
+                onNextMessage: _scrollToNextMessage,
               ),
             ),
         ],
