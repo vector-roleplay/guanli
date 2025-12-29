@@ -22,9 +22,6 @@ dependencies:
   image_picker: any
   shared_preferences: any
   uuid: any
-  markdown: any
-  
-  # 权限请求
   permission_handler: any
   device_info_plus: any
 
