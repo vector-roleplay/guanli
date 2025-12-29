@@ -440,10 +440,19 @@ class _MainChatScreenState extends State<MainChatScreen> {
                     ),
                   ),
             ),
-            ChatInput(onSend: _sendMessage, enabled: !_isLoading),
+            ChatInput(onSend: _sendMessage, enabled: !_isLoading, isGenerating: _isLoading, onStop: _stopGeneration),
+
           ]),
           if (_showScrollButtons && hasMessages)
-            Positioned(right: 12, bottom: 80, child: ScrollButtons(onScrollToTop: _scrollToTop, onScrollToBottom: _forceScrollToBottom, onPreviousMessage: _scrollToPreviousMessage, onNextMessage: _scrollToNextMessage)),
+            Positioned(
+              bottom: 80,
+              left: 0,
+              right: 0,
+              child: Center(
+                child: ScrollButtons(onScrollToTop: _scrollToTop, onScrollToBottom: _forceScrollToBottom, onPreviousMessage: _scrollToPreviousMessage, onNextMessage: _scrollToNextMessage),
+              ),
+            ),
+
         ],
       ),
     );
