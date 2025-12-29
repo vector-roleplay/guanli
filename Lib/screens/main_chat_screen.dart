@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import '../models/message.dart';
 import '../models/conversation.dart';
 import '../models/sub_conversation.dart';
+import '../config/app_config.dart';
 import '../services/api_service.dart';
 import '../services/database_service.dart';
 import '../services/conversation_service.dart';
