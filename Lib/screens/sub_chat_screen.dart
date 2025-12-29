@@ -46,6 +46,11 @@ class _SubChatScreenState extends State<SubChatScreen> {
   Timer? _hideButtonsTimer;
   
   final Map<int, GlobalKey> _messageKeys = {};
+  
+  // 节流控制
+  DateTime _lastUIUpdate = DateTime.now();
+  static const Duration _uiUpdateInterval = Duration(milliseconds: 100);
+  String _pendingContent = '';
 
   @override
   void initState() {
