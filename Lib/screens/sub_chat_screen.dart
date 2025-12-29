@@ -496,19 +496,6 @@ class _SubChatScreenState extends State<SubChatScreen> {
           status: MessageStatus.sending,
         );
       }
-          if (msgIndex != -1) {
-            _subConversation.messages[msgIndex] = Message(
-              id: aiMessage.id,
-              role: MessageRole.assistant,
-              content: fullResponseContent,
-              timestamp: aiMessage.timestamp,
-              status: MessageStatus.sending,
-            );
-            setState(() {});
-            _scrollToBottom();
-          }
-        },
-      );
 
       stopwatch.stop();
 
