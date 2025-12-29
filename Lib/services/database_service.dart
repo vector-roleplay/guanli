@@ -250,4 +250,57 @@ class DatabaseService {
     );
   }
 
+  // 从 GitHub 导入文件
+  Future<void> importGitHubFile(String path, String content) async {
+    final name = path.split('/').last;
+    final parentPath = path.contains('/') ? path.substring(0, path.lastIndexOf('/')) : null;
+
+    // 确保父目录存在
+    if (parentPath != null) {
+      await _ensureDirectoryExists(parentPath);
+    }
+
+    await db.insert(
+      'files',
+      {
+        'name': name,
+        'path': path,
+        'parent_path': parentPath,
+        'is_directory': 0,
+        'size': content.length,
+        'content': content,
+        'created_at': DateTime.now().toIso8601String(),
+        'updated_at': DateTime.now().toIso8601String(),
+      },
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+  }
+
+  Future<void> _ensureDirectoryExists(String dirPath) async {
+    final parts = dirPath.split('/');
+    String currentPath = '';
+
+    for (int i = 0; i < parts.length; i++) {
+      final part = parts[i];
+      final parentPath = currentPath.isEmpty ? null : currentPath;
+      currentPath = currentPath.isEmpty ? part : '$currentPath/$part';
+
+      final existing = await db.query('files', where: 'path = ?', whereArgs: [currentPath]);
+      if (existing.isEmpty) {
+        await db.insert(
+          'files',
+          {
+            'name': part,
+            'path': currentPath,
+            'parent_path': parentPath,
+            'is_directory': 1,
+            'created_at': DateTime.now().toIso8601String(),
+            'updated_at': DateTime.now().toIso8601String(),
+          },
+          conflictAlgorithm: ConflictAlgorithm.ignore,
+        );
+      }
+    }
+  }
+
 }
