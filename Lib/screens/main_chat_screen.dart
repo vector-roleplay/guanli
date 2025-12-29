@@ -39,6 +39,11 @@ class _MainChatScreenState extends State<MainChatScreen> {
   bool _isNearBottom = true;
   Timer? _hideButtonsTimer;
   final Map<int, GlobalKey> _messageKeys = {};
+  
+  // 节流控制
+  DateTime _lastUIUpdate = DateTime.now();
+  static const Duration _uiUpdateInterval = Duration(milliseconds: 100);
+  String _pendingContent = '';
 
   @override
   void initState() {
@@ -250,7 +255,27 @@ class _MainChatScreenState extends State<MainChatScreen> {
         directoryTree: _directoryTree,
         onChunk: (chunk) {
           fullContent += chunk;
-          final msgIndex = _currentConversation!.messages.indexWhere((m) => m.id == aiMessage.id);
+          _pendingContent = fullContent;
+          
+          // 节流：100ms 更新一次 UI
+          final now = DateTime.now();
+          if (now.difference(_lastUIUpdate) >= _uiUpdateInterval) {
+            _lastUIUpdate = now;
+            final msgIndex = _currentConversation!.messages.indexWhere((m) => m.id == aiMessage.id);
+            if (msgIndex != -1) {
+              _currentConversation!.messages[msgIndex] = Message(id: aiMessage.id, role: MessageRole.assistant, content: _pendingContent, timestamp: aiMessage.timestamp, status: MessageStatus.sending);
+              setState(() {});
+              _scrollToBottom();
+            }
+          }
+        },
+      );
+      
+      // 确保最后一次更新
+      final msgIndexFinal = _currentConversation!.messages.indexWhere((m) => m.id == aiMessage.id);
+      if (msgIndexFinal != -1 && _pendingContent.isNotEmpty) {
+        _currentConversation!.messages[msgIndexFinal] = Message(id: aiMessage.id, role: MessageRole.assistant, content: _pendingContent, timestamp: aiMessage.timestamp, status: MessageStatus.sending);
+      }
           if (msgIndex != -1) {
             _currentConversation!.messages[msgIndex] = Message(id: aiMessage.id, role: MessageRole.assistant, content: fullContent, timestamp: aiMessage.timestamp, status: MessageStatus.sending);
             setState(() {});
