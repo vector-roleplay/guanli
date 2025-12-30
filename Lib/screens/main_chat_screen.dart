@@ -235,7 +235,7 @@ class _MainChatScreenState extends State<MainChatScreen> {
     }
   }
 
-
+  Future<void> _regenerateMessage(int aiMessageIndex) async {
     if (_currentConversation == null) return;
     _currentConversation!.messages.removeAt(aiMessageIndex);
     _messageKeys.remove(aiMessageIndex);
@@ -245,6 +245,7 @@ class _MainChatScreenState extends State<MainChatScreen> {
   }
 
   Future<void> _sendAllFiles() async {
+
     if (_currentConversation == null) return;
     
     // 获取所有根目录（仓库）
