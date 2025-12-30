@@ -286,15 +286,15 @@ class _MainChatScreenState extends State<MainChatScreen> {
       return;
     }
 
-    // 显示内容只显示文件数量，不重复显示目录（目录在附件中）
+    // 显示内容只显示文件数量
     String displayContent = '【发送文件】共 ${filesToSend.length} 个文件';
-    // 完整内容包含目录和文件
+    // 完整内容包含目录和文件（后台打包发送，不显示为附件）
     String fullContent = '【发送文件】共 ${filesToSend.length} 个文件\n\n【文件目录】\n$_directoryTree\n\n【文件内容】\n';
     List<EmbeddedFile> embeddedFiles = [];
-    // 目录作为附件
-    embeddedFiles.add(EmbeddedFile(path: '📁 文件目录.txt', content: _directoryTree, size: _directoryTree.length));
+    // 不再添加目录附件，只后台打包发送
     for (var file in filesToSend) {
       final path = file['path'] as String;
+
       final content = file['content'] as String? ?? '';
       final size = file['size'] as int? ?? content.length;
       fullContent += '--- $path ---\n$content\n\n';
@@ -578,9 +578,10 @@ class _MainChatScreenState extends State<MainChatScreen> {
       final lastMsg = _currentConversation!.messages.last;
       if (lastMsg.role == MessageRole.assistant && lastMsg.status == MessageStatus.sending) {
         final content = _streamingContent.value;
-        if (content.isNotEmpty) {
-          final msgIndex = _currentConversation!.messages.indexWhere((m) => m.id == lastMsg.id);
-          if (msgIndex != -1) {
+        final msgIndex = _currentConversation!.messages.indexWhere((m) => m.id == lastMsg.id);
+        if (msgIndex != -1) {
+          if (content.isNotEmpty) {
+            // 有内容，更新为已停止
             _currentConversation!.messages[msgIndex] = Message(
               id: lastMsg.id,
               role: MessageRole.assistant,
@@ -589,13 +590,19 @@ class _MainChatScreenState extends State<MainChatScreen> {
               status: MessageStatus.sent,
             );
             ConversationService.instance.update(_currentConversation!);
+          } else {
+            // 没有内容，直接删除这条消息
+            _currentConversation!.messages.removeAt(msgIndex);
+            ConversationService.instance.update(_currentConversation!);
           }
         }
       }
     }
+    setState(() {});
   }
 
   Future<void> _sendMessageToAI() async {
+
 
     if (_currentConversation == null) return;
     _stopRequested = false;
