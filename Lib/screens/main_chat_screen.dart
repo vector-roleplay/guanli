@@ -286,13 +286,14 @@ class _MainChatScreenState extends State<MainChatScreen> {
       return;
     }
 
-    // 显示内容只显示文件数量
-    String displayContent = '【发送文件】共 ${filesToSend.length} 个文件';
+    // 显示内容简洁，不显示文件数量（因为下面的附件区域已经显示了）
+    String displayContent = '【发送文件】';
     // 完整内容包含目录和文件（后台打包发送，不显示为附件）
     String fullContent = '【发送文件】共 ${filesToSend.length} 个文件\n\n【文件目录】\n$_directoryTree\n\n【文件内容】\n';
     List<EmbeddedFile> embeddedFiles = [];
     // 不再添加目录附件，只后台打包发送
     for (var file in filesToSend) {
+
       final path = file['path'] as String;
 
       final content = file['content'] as String? ?? '';
@@ -302,10 +303,11 @@ class _MainChatScreenState extends State<MainChatScreen> {
     }
     int totalTokens = ApiService.estimateTokens(fullContent);
     if (totalTokens > AppConfig.maxTokens) {
-      displayContent += '\n\n【已超过900K】';
+      displayContent += '\n【已超过900K】';
       fullContent += '\n\n【已超过900K】';
     }
     final userMessage = Message(role: MessageRole.user, content: displayContent, fullContent: fullContent, embeddedFiles: embeddedFiles, status: MessageStatus.sent);
+
 
     _currentConversation!.messages.add(userMessage);
     await ConversationService.instance.update(_currentConversation!);
