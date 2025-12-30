@@ -272,10 +272,9 @@ class _MainChatScreenState extends State<MainChatScreen> {
       }
     }
   }
-);
-  }
 
   Future<void> _sendMessageToAI() async {
+
     if (_currentConversation == null) return;
     _stopRequested = false;
     final aiMessage = Message(role: MessageRole.assistant, content: '', status: MessageStatus.sending);
