@@ -50,8 +50,12 @@ class _SubChatScreenState extends State<SubChatScreen> {
   
   // 节流控制
   DateTime _lastUIUpdate = DateTime.now();
-  static const Duration _uiUpdateInterval = Duration(milliseconds: 100);
-  String _pendingContent = '';
+  static const Duration _uiUpdateInterval = Duration(milliseconds: 150);
+  
+  // 流式消息专用
+  final ValueNotifier<String> _streamingContent = ValueNotifier('');
+  String? _streamingMessageId;
+
 
   @override
   void initState() {
@@ -98,8 +102,10 @@ class _SubChatScreenState extends State<SubChatScreen> {
     _hideButtonsTimer?.cancel();
     _scrollController.removeListener(_onScroll);
     _scrollController.dispose();
+    _streamingContent.dispose();
     super.dispose();
   }
+
 
   void _scrollToBottom() {
     if (_userScrolling || !_isNearBottom) return;
@@ -453,6 +459,8 @@ class _SubChatScreenState extends State<SubChatScreen> {
       status: MessageStatus.sending,
     );
     _subConversation.messages.add(aiMessage);
+    _streamingMessageId = aiMessage.id;
+    _streamingContent.value = '';
     setState(() {
       _isLoading = true;
     });
@@ -471,13 +479,21 @@ class _SubChatScreenState extends State<SubChatScreen> {
         level: _subConversation.level,
         onChunk: (chunk) {
           fullResponseContent += chunk;
-          _pendingContent = fullResponseContent;
           
-          // 节流：100ms 更新一次 UI
           final now = DateTime.now();
           if (now.difference(_lastUIUpdate) >= _uiUpdateInterval) {
             _lastUIUpdate = now;
-            final msgIndex = _subConversation.messages.indexWhere((m) => m.id == aiMessage.id);
+            _streamingContent.value = fullResponseContent;
+            _scrollToBottom();
+          }
+        },
+      );
+
+      stopwatch.stop();
+      _streamingMessageId = null;
+
+      final msgIndex = _subConversation.messages.indexWhere((m) => m.id == aiMessage.id);
+
             if (msgIndex != -1) {
               _subConversation.messages[msgIndex] = Message(
                 id: aiMessage.id,
@@ -705,6 +721,47 @@ class _SubChatScreenState extends State<SubChatScreen> {
                         child: ListView.builder(
                           controller: _scrollController,
                           padding: const EdgeInsets.symmetric(vertical: 16),
+                          itemCount: _subConversation.messages.length,
+                          itemBuilder: (context, index) {
+                            _messageKeys[index] ??= GlobalKey();
+                            final message = _subConversation.messages[index];
+                            
+                            // 流式消息局部更新
+                            if (message.id == _streamingMessageId) {
+                              return Container(
+                                key: _messageKeys[index],
+                                child: ValueListenableBuilder<String>(
+                                  valueListenable: _streamingContent,
+                                  builder: (context, content, _) {
+                                    final streamingMsg = Message(
+                                      id: message.id,
+                                      role: MessageRole.assistant,
+                                      content: content,
+                                      timestamp: message.timestamp,
+                                      status: MessageStatus.sending,
+                                    );
+                                    return MessageBubble(message: streamingMsg);
+                                  },
+                                ),
+                              );
+                            }
+                            
+                            return Container(
+                              key: _messageKeys[index],
+                              child: MessageBubble(
+                                message: message,
+                                onRetry: message.status == MessageStatus.error
+                                    ? () => _sendMessage(message.content, message.attachments)
+                                    : null,
+                                onDelete: () => _deleteMessage(index),
+                                onRegenerate: message.role == MessageRole.assistant && message.status == MessageStatus.sent
+                                    ? () => _regenerateMessage(index)
+                                    : null,
+                              ),
+                            );
+                          },
+                        ),
+
                           itemCount: _subConversation.messages.length,
                           itemBuilder: (context, index) {
                             _messageKeys[index] ??= GlobalKey();
