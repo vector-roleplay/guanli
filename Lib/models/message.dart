@@ -1,5 +1,7 @@
 // lib/models/message.dart
 
+import 'dart:convert';
+import 'dart:io';
 import 'package:uuid/uuid.dart';
 
 enum MessageRole { user, assistant, system }
@@ -129,10 +131,100 @@ class Message {
     );
   }
 
-  Map<String, dynamic> toApiFormat() {
+  // 转换为API格式（支持多模态）
+  Future<Map<String, dynamic>> toApiFormatAsync() async {
+    // 分离图片和文本文件
+    final imageAttachments = attachments.where((a) => a.mimeType.startsWith('image/')).toList();
+    final textAttachments = attachments.where((a) => !a.mimeType.startsWith('image/')).toList();
+    
+    // 构建文本内容
+    String textContent = apiContent;
+    
+    // 添加文本文件内容
+    if (textAttachments.isNotEmpty) {
+      textContent += '\n\n【附件内容】\n';
+      for (var att in textAttachments) {
+        if (att.content != null && att.content!.isNotEmpty) {
+          textContent += '--- ${att.name} ---\n${att.content}\n\n';
+        } else {
+          // 尝试读取文件
+          try {
+            final file = File(att.path);
+            if (await file.exists()) {
+              final content = await file.readAsString();
+              textContent += '--- ${att.name} ---\n$content\n\n';
+            }
+          } catch (e) {
+            textContent += '--- ${att.name} ---\n[无法读取文件内容]\n\n';
+          }
+        }
+      }
+    }
+    
+    // 如果没有图片，返回简单格式
+    if (imageAttachments.isEmpty) {
+      return {
+        'role': role.name,
+        'content': textContent,
+      };
+    }
+    
+    // 有图片，使用多模态格式
+    List<Map<String, dynamic>> contentParts = [];
+    
+    // 先添加文本
+    if (textContent.isNotEmpty) {
+      contentParts.add({
+        'type': 'text',
+        'text': textContent,
+      });
+    }
+    
+    // 添加图片
+    for (var img in imageAttachments) {
+      try {
+        final file = File(img.path);
+        if (await file.exists()) {
+          final bytes = await file.readAsBytes();
+          final base64Data = base64Encode(bytes);
+          final mimeType = img.mimeType.isNotEmpty ? img.mimeType : 'image/jpeg';
+          
+          contentParts.add({
+            'type': 'image_url',
+            'image_url': {
+              'url': 'data:$mimeType;base64,$base64Data',
+            },
+          });
+        }
+      } catch (e) {
+        // 图片读取失败，跳过
+      }
+    }
+    
     return {
       'role': role.name,
-      'content': apiContent,
+      'content': contentParts,
+    };
+  }
+
+  // 同步版本（兼容旧代码，不处理图片）
+  Map<String, dynamic> toApiFormat() {
+    String textContent = apiContent;
+    
+    // 添加文本文件内容
+    final textAttachments = attachments.where((a) => !a.mimeType.startsWith('image/')).toList();
+    if (textAttachments.isNotEmpty) {
+      textContent += '\n\n【附件内容】\n';
+      for (var att in textAttachments) {
+        if (att.content != null && att.content!.isNotEmpty) {
+          textContent += '--- ${att.name} ---\n${att.content}\n\n';
+        }
+      }
+    }
+    
+    return {
+      'role': role.name,
+      'content': textContent,
     };
   }
 }
@@ -153,6 +245,8 @@ class FileAttachment {
     required this.size,
     this.content,
   }) : id = id ?? const Uuid().v4();
+
+  bool get isImage => mimeType.startsWith('image/');
 
   Map<String, dynamic> toJson() {
     return {
