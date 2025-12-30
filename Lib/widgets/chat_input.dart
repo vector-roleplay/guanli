@@ -59,12 +59,46 @@ class _ChatInputState extends State<ChatInput> {
           final mimeType = lookupMimeType(file.path!) ?? 'application/octet-stream';
           
           String? content;
-          if (mimeType.startsWith('text/') || 
+          // 尝试读取更多类型的文本文件
+          final textExtensions = [
+            '.txt', '.md', '.json', '.xml', '.yaml', '.yml',
+            '.dart', '.js', '.ts', '.jsx', '.tsx', '.py', '.java',
+            '.c', '.cpp', '.h', '.hpp', '.cs', '.go', '.rs', '.rb',
+            '.php', '.html', '.css', '.scss', '.less', '.vue', '.svelte',
+            '.sh', '.bash', '.zsh', '.fish', '.ps1', '.bat', '.cmd',
+            '.sql', '.graphql', '.proto', '.toml', '.ini', '.cfg', '.conf',
+            '.env', '.gitignore', '.dockerfile', '.makefile',
+          ];
+          
+          final ext = file.name.toLowerCase();
+          final isTextFile = mimeType.startsWith('text/') || 
               mimeType.contains('json') || 
-              mimeType.contains('xml')) {
+              mimeType.contains('xml') ||
+              mimeType.contains('javascript') ||
+              textExtensions.any((e) => ext.endsWith(e));
+          
+          if (isTextFile) {
             try {
               content = await fileInfo.readAsString();
             } catch (e) {
+              // 无法读取为文本，可能是二进制文件
+            }
+          }
+
+          setState(() {
+            _attachments.add(FileAttachment(
+              name: file.name,
+              path: file.path!,
+              mimeType: mimeType,
+              size: file.size,
+              content: content,
+            ));
+          });
+        }
+      }
+    }
+  }
+ catch (e) {
               // 无法读取为文本
             }
           }
