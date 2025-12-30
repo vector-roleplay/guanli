@@ -6,7 +6,6 @@ import 'package:flutter_markdown/flutter_markdown.dart';
 import 'dart:io';
 import '../models/message.dart';
 import 'file_attachment_view.dart';
-import 'code_block.dart';
 
 class MessageBubble extends StatefulWidget {
   final Message message;
@@ -55,67 +54,127 @@ class _MessageBubbleState extends State<MessageBubble> with AutomaticKeepAliveCl
         width: double.infinity,
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+          crossAxisAlignment: isUser ? CrossAxisAlignment.end : CrossAxisAlignment.start,
           children: [
+            // 消息内容
+            if (isUser)
+              _buildUserMessage(context)
+            else
+              _buildAIMessage(context),
+            
+            // 附件区域（放在气泡外面下方）
+            if (widget.message.attachments.isNotEmpty || widget.message.embeddedFiles.isNotEmpty)
+              Padding(
+                padding: EdgeInsets.only(top: 8, left: isUser ? 40 : 0, right: isUser ? 0 : 40),
+                child: _buildAttachmentsSection(context),
+              ),
+            
+            // 底部操作栏
             Padding(
-              padding: const EdgeInsets.only(bottom: 4, left: 4),
-              child: Text(
-                isUser ? '你' : 'AI',
-                style: TextStyle(fontSize: 12, color: colorScheme.outline),
-              ),
+              padding: const EdgeInsets.only(top: 6),
+              child: _buildFooter(context),
             ),
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: isUser ? colorScheme.primaryContainer : colorScheme.surfaceContainerHighest,
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  if (widget.message.attachments.any((a) => a.mimeType.startsWith('image/'))) ...[
-                    _buildImageAttachments(context),
-                    const SizedBox(height: 8),
-                  ],
-                  if (widget.message.attachments.any((a) => !a.mimeType.startsWith('image/'))) ...[
-                    _buildFileAttachments(context),
-                    const SizedBox(height: 8),
-                  ],
-                  if (widget.message.content.isNotEmpty)
-                    isSending 
-                        ? _buildStreamingContent(context)
-                        : _buildCachedContent(context),
-                  if (widget.message.embeddedFiles.isNotEmpty) ...[
-                    const SizedBox(height: 12),
-                    FileAttachmentView(
-                      files: widget.message.embeddedFiles.map((f) => FileAttachmentData(path: f.path, content: f.content, size: f.size)).toList(),
-                    ),
-                  ],
-                  if (isSending)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 8),
-                      child: SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: colorScheme.primary)),
-                    ),
-                  if (widget.message.status == MessageStatus.error && !_isUserStopped) _buildError(context),
-                ],
-              ),
-            ),
-            Padding(padding: const EdgeInsets.only(top: 6, left: 4, right: 4), child: _buildFooter(context)),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildStreamingContent(BuildContext context) {
+  // 用户消息 - 右对齐，黑灰色背景，短消息短气泡
+  Widget _buildUserMessage(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    
+    return Container(
+      constraints: BoxConstraints(
+        maxWidth: MediaQuery.of(context).size.width * 0.75,
+      ),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF3A3A3C) : const Color(0xFFE5E5EA),
+        borderRadius: BorderRadius.circular(18),
+      ),
+      child: Text(
+        widget.message.content,
+        style: TextStyle(
+          color: isDark ? Colors.white : Colors.black,
+          fontSize: 15,
+          height: 1.4,
+        ),
+      ),
+    );
+  }
+
+  // AI消息 - 左对齐，透明背景
+  Widget _buildAIMessage(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final isSending = widget.message.status == MessageStatus.sending;
+    
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (widget.message.content.isNotEmpty)
+          isSending 
+              ? _buildStreamingContent(context)
+              : _buildCachedContent(context),
+        if (isSending)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: SizedBox(
+              width: 16, 
+              height: 16, 
+              child: CircularProgressIndicator(
+                strokeWidth: 2, 
+                color: colorScheme.primary,
+              ),
+            ),
+          ),
+        if (widget.message.status == MessageStatus.error && !_isUserStopped) 
+          _buildError(context),
+      ],
+    );
+  }
+
+  // 附件区域
+  Widget _buildAttachmentsSection(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
     final isUser = widget.message.role == MessageRole.user;
+    
+    return Column(
+      crossAxisAlignment: isUser ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+      children: [
+        // 图片附件
+        if (widget.message.attachments.any((a) => a.mimeType.startsWith('image/')))
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: _buildImageAttachments(context),
+          ),
+        
+        // 文件附件
+        if (widget.message.attachments.any((a) => !a.mimeType.startsWith('image/')))
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: _buildFileAttachments(context),
+          ),
+        
+        // 内嵌文件
+        if (widget.message.embeddedFiles.isNotEmpty)
+          FileAttachmentView(
+            files: widget.message.embeddedFiles
+                .map((f) => FileAttachmentData(path: f.path, content: f.content, size: f.size))
+                .toList(),
+          ),
+      ],
+    );
+  }
+
+  Widget _buildStreamingContent(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     
     return SelectableText(
       widget.message.content,
       style: TextStyle(
-        color: isUser ? colorScheme.onPrimaryContainer : colorScheme.onSurfaceVariant,
+        color: colorScheme.onSurface,
         fontSize: 15,
         height: 1.6,
       ),
@@ -136,6 +195,7 @@ class _MessageBubbleState extends State<MessageBubble> with AutomaticKeepAliveCl
   List<_ContentBlock> _parseContent(String content) {
     List<_ContentBlock> blocks = [];
     
+    // 提取思维链
     final thinkingRegex = RegExp(r'<think(?:ing)?>([\s\S]*?)</think(?:ing)?>', caseSensitive: false);
     final thinkMatch = thinkingRegex.firstMatch(content);
     
@@ -147,6 +207,7 @@ class _MessageBubbleState extends State<MessageBubble> with AutomaticKeepAliveCl
     
     if (mainContent.isEmpty) return blocks;
     
+    // 提取代码块
     final codeBlockRegex = RegExp(r'```(\w*)\n?([\s\S]*?)```');
     final matches = codeBlockRegex.allMatches(mainContent).toList();
     
@@ -189,7 +250,7 @@ class _MessageBubbleState extends State<MessageBubble> with AutomaticKeepAliveCl
           case _BlockType.thinking:
             return _buildThinkingBlock(context, block.content);
           case _BlockType.code:
-            return CodeBlock(code: block.content, language: block.language);
+            return _buildCodeBlock(context, block.content, block.language);
           case _BlockType.markdown:
             return _buildMarkdownBlock(context, block.content);
         }
@@ -197,45 +258,150 @@ class _MessageBubbleState extends State<MessageBubble> with AutomaticKeepAliveCl
     );
   }
 
+  // 思维链 - 圆角按钮样式
   Widget _buildThinkingBlock(BuildContext context, String content) {
     final colorScheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     
     return GestureDetector(
       onTap: () => setState(() => _thinkingExpanded = !_thinkingExpanded),
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-        margin: const EdgeInsets.only(bottom: 8),
-        decoration: BoxDecoration(
-          color: colorScheme.surfaceContainerHighest,
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: colorScheme.outline.withOpacity(0.3)),
-        ),
+        margin: const EdgeInsets.only(bottom: 12),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
-              children: [
-                Icon(_thinkingExpanded ? Icons.expand_less : Icons.expand_more, size: 20, color: colorScheme.primary),
-                const SizedBox(width: 6),
-                Text('💭 思考过程', style: TextStyle(color: colorScheme.primary, fontWeight: FontWeight.w500)),
-                const Spacer(),
-                Text(_thinkingExpanded ? '点击折叠' : '点击展开', style: TextStyle(fontSize: 12, color: colorScheme.outline)),
-              ],
+            // 折叠按钮
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+              decoration: BoxDecoration(
+                color: isDark ? const Color(0xFF2C2C2E) : const Color(0xFFF2F2F7),
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    Icons.psychology,
+                    size: 18,
+                    color: colorScheme.primary,
+                  ),
+                  const SizedBox(width: 6),
+                  Text(
+                    '深度思考',
+                    style: TextStyle(
+                      fontSize: 14,
+                      color: colorScheme.onSurface,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                  const SizedBox(width: 4),
+                  Icon(
+                    _thinkingExpanded ? Icons.expand_less : Icons.expand_more,
+                    size: 18,
+                    color: colorScheme.onSurfaceVariant,
+                  ),
+                ],
+              ),
             ),
-            if (_thinkingExpanded) ...[
-              const SizedBox(height: 8),
-              const Divider(height: 1),
-              const SizedBox(height: 8),
-              Text(content.trim(), style: TextStyle(fontSize: 13, color: colorScheme.onSurfaceVariant.withOpacity(0.8), fontStyle: FontStyle.italic, height: 1.5)),
-            ],
+            // 展开内容
+            if (_thinkingExpanded)
+              Container(
+                margin: const EdgeInsets.only(top: 8),
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: isDark ? const Color(0xFF1C1C1E) : const Color(0xFFF8F8F8),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: colorScheme.outline.withOpacity(0.2),
+                  ),
+                ),
+                child: Text(
+                  content.trim(),
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: colorScheme.onSurfaceVariant,
+                    height: 1.5,
+                  ),
+                ),
+              ),
           ],
         ),
       ),
     );
   }
 
+  // 代码块 - 更自然的样式
+  Widget _buildCodeBlock(BuildContext context, String code, String? language) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    return Container(
+      margin: const EdgeInsets.symmetric(vertical: 8),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF1C1C1E) : const Color(0xFFF5F5F5),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // 顶部栏
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(
+              border: Border(
+                bottom: BorderSide(
+                  color: colorScheme.outline.withOpacity(0.1),
+                ),
+              ),
+            ),
+            child: Row(
+              children: [
+                Text(
+                  language?.isNotEmpty == true ? language! : 'code',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: colorScheme.outline,
+                  ),
+                ),
+                const Spacer(),
+                GestureDetector(
+                  onTap: () {
+                    Clipboard.setData(ClipboardData(text: code));
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('已复制'), duration: Duration(seconds: 1)),
+                    );
+                  },
+                  child: Text(
+                    '复制代码',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: colorScheme.primary,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          // 代码内容
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.all(12),
+            child: Text(
+              code,
+              style: TextStyle(
+                fontFamily: 'monospace',
+                fontSize: 13,
+                color: isDark ? const Color(0xFFE5E5E5) : const Color(0xFF333333),
+                height: 1.5,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildMarkdownBlock(BuildContext context, String content) {
-    final isUser = widget.message.role == MessageRole.user;
     final colorScheme = Theme.of(context).colorScheme;
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
@@ -245,29 +411,32 @@ class _MessageBubbleState extends State<MessageBubble> with AutomaticKeepAliveCl
       softLineBreak: true,
       styleSheet: MarkdownStyleSheet(
         p: TextStyle(
-          color: isUser ? colorScheme.onPrimaryContainer : colorScheme.onSurfaceVariant, 
+          color: colorScheme.onSurface,
           fontSize: 15,
           height: 1.6,
         ),
-        h1: TextStyle(color: isUser ? colorScheme.onPrimaryContainer : colorScheme.onSurfaceVariant, fontSize: 22, fontWeight: FontWeight.bold, height: 1.4),
-        h2: TextStyle(color: isUser ? colorScheme.onPrimaryContainer : colorScheme.onSurfaceVariant, fontSize: 20, fontWeight: FontWeight.bold, height: 1.4),
-        h3: TextStyle(color: isUser ? colorScheme.onPrimaryContainer : colorScheme.onSurfaceVariant, fontSize: 18, fontWeight: FontWeight.bold, height: 1.4),
-        strong: TextStyle(color: isUser ? colorScheme.onPrimaryContainer : colorScheme.onSurfaceVariant, fontWeight: FontWeight.bold),
-        em: TextStyle(color: isUser ? colorScheme.onPrimaryContainer : colorScheme.onSurfaceVariant, fontStyle: FontStyle.italic),
+        h1: TextStyle(color: colorScheme.onSurface, fontSize: 22, fontWeight: FontWeight.bold, height: 1.4),
+        h2: TextStyle(color: colorScheme.onSurface, fontSize: 20, fontWeight: FontWeight.bold, height: 1.4),
+        h3: TextStyle(color: colorScheme.onSurface, fontSize: 18, fontWeight: FontWeight.bold, height: 1.4),
+        strong: TextStyle(color: colorScheme.onSurface, fontWeight: FontWeight.bold),
+        em: TextStyle(color: colorScheme.onSurface, fontStyle: FontStyle.italic),
         blockquote: TextStyle(color: colorScheme.outline, fontStyle: FontStyle.italic, height: 1.5),
-        blockquoteDecoration: BoxDecoration(border: Border(left: BorderSide(color: colorScheme.primary, width: 3))),
+        blockquoteDecoration: BoxDecoration(
+          border: Border(left: BorderSide(color: colorScheme.primary, width: 3)),
+        ),
         blockquotePadding: const EdgeInsets.only(left: 12),
         code: TextStyle(
-          backgroundColor: isDark ? const Color(0xFF2D2D2D) : const Color(0xFFE8E8E8), 
-          fontFamily: 'monospace', 
+          backgroundColor: isDark ? const Color(0xFF2C2C2E) : const Color(0xFFE8E8E8),
+          fontFamily: 'monospace',
           fontSize: 13,
+          color: colorScheme.onSurface,
         ),
         codeblockDecoration: BoxDecoration(
-          color: isDark ? const Color(0xFF1E1E1E) : const Color(0xFFF5F5F5), 
-          borderRadius: BorderRadius.circular(8),
+          color: isDark ? const Color(0xFF1C1C1E) : const Color(0xFFF5F5F5),
+          borderRadius: BorderRadius.circular(12),
         ),
         codeblockPadding: const EdgeInsets.all(12),
-        listBullet: TextStyle(color: isUser ? colorScheme.onPrimaryContainer : colorScheme.onSurfaceVariant, height: 1.5),
+        listBullet: TextStyle(color: colorScheme.onSurface, height: 1.5),
         listIndent: 20,
         tableBorder: TableBorder.all(color: colorScheme.outline.withOpacity(0.5), width: 1),
         tableColumnWidth: const IntrinsicColumnWidth(),
@@ -277,28 +446,41 @@ class _MessageBubbleState extends State<MessageBubble> with AutomaticKeepAliveCl
     );
   }
 
+  // 图片附件 - 手机比例缩略图
   Widget _buildImageAttachments(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     final images = widget.message.attachments.where((a) => a.mimeType.startsWith('image/')).toList();
+    final isUser = widget.message.role == MessageRole.user;
+    
     return Wrap(
       spacing: 8,
       runSpacing: 8,
+      alignment: isUser ? WrapAlignment.end : WrapAlignment.start,
       children: images.map((att) {
         return GestureDetector(
           onTap: () => _showFullImage(context, att.path),
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(8),
-            child: Image.file(
-              File(att.path),
-              width: 120,
-              height: 120,
-              fit: BoxFit.cover,
-              cacheWidth: 240,
-              errorBuilder: (ctx, err, stack) => Container(
-                width: 120,
-                height: 120,
-                decoration: BoxDecoration(color: colorScheme.surfaceContainerHighest, borderRadius: BorderRadius.circular(8)),
-                child: Icon(Icons.broken_image, color: colorScheme.outline),
+          child: Container(
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: colorScheme.outline.withOpacity(0.2)),
+            ),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: Image.file(
+                File(att.path),
+                width: 80,
+                height: 100,  // 手机比例 4:5
+                fit: BoxFit.cover,
+                cacheWidth: 160,
+                errorBuilder: (ctx, err, stack) => Container(
+                  width: 80,
+                  height: 100,
+                  decoration: BoxDecoration(
+                    color: colorScheme.surfaceContainerHighest,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Icon(Icons.broken_image, color: colorScheme.outline),
+                ),
               ),
             ),
           ),
@@ -337,26 +519,37 @@ class _MessageBubbleState extends State<MessageBubble> with AutomaticKeepAliveCl
     );
   }
 
+  // 文件附件
   Widget _buildFileAttachments(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final files = widget.message.attachments.where((a) => !a.mimeType.startsWith('image/')).toList();
+    final isUser = widget.message.role == MessageRole.user;
+    
     return Wrap(
       spacing: 8,
       runSpacing: 8,
+      alignment: isUser ? WrapAlignment.end : WrapAlignment.start,
       children: files.map((att) {
         return Container(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
           decoration: BoxDecoration(
-            color: colorScheme.surface,
+            color: isDark ? const Color(0xFF2C2C2E) : const Color(0xFFF2F2F7),
             borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: colorScheme.outline.withOpacity(0.3)),
           ),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
               Icon(Icons.insert_drive_file, size: 18, color: colorScheme.primary),
-              const SizedBox(width: 6),
-              Text(att.name, style: const TextStyle(fontSize: 13)),
+              const SizedBox(width: 8),
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 150),
+                child: Text(
+                  att.name,
+                  style: TextStyle(fontSize: 13, color: colorScheme.onSurface),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
             ],
           ),
         );
@@ -376,27 +569,9 @@ class _MessageBubbleState extends State<MessageBubble> with AutomaticKeepAliveCl
           Text('发送失败', style: TextStyle(fontSize: 12, color: colorScheme.error)),
           if (widget.onRetry != null) ...[
             const SizedBox(width: 8),
-            GestureDetector(onTap: widget.onRetry, child: Text('重试', style: TextStyle(fontSize: 12, color: colorScheme.primary, fontWeight: FontWeight.bold))),
-          ],
-          if (widget.onDelete != null) ...[
-            const SizedBox(width: 12),
             GestureDetector(
-              onTap: widget.onDelete,
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                decoration: BoxDecoration(
-                  color: colorScheme.error.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(4),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(Icons.delete_outline, size: 14, color: colorScheme.error),
-                    const SizedBox(width: 4),
-                    Text('删除', style: TextStyle(fontSize: 12, color: colorScheme.error, fontWeight: FontWeight.bold)),
-                  ],
-                ),
-              ),
+              onTap: widget.onRetry,
+              child: Text('重试', style: TextStyle(fontSize: 12, color: colorScheme.primary, fontWeight: FontWeight.bold)),
             ),
           ],
         ],
@@ -412,42 +587,70 @@ class _MessageBubbleState extends State<MessageBubble> with AutomaticKeepAliveCl
     final isSent = widget.message.status == MessageStatus.sent;
 
     return Row(
+      mainAxisAlignment: isUser ? MainAxisAlignment.end : MainAxisAlignment.start,
       children: [
-        Expanded(
-          child: Wrap(
-            spacing: 12,
-            children: [
-              if (isAI && usage != null) ...[
-                Text('↑ ${_formatNumber(usage.promptTokens)}', style: TextStyle(fontSize: 10, color: colorScheme.outline.withOpacity(0.7))),
-                Text('↓ ${_formatNumber(usage.completionTokens)}', style: TextStyle(fontSize: 10, color: colorScheme.outline.withOpacity(0.7))),
-                if (usage.tokensPerSecond > 0) Text('⚡${usage.tokensPerSecond.toStringAsFixed(1)}/s', style: TextStyle(fontSize: 10, color: colorScheme.outline.withOpacity(0.7))),
-                if (usage.duration > 0) Text('⏱${usage.duration.toStringAsFixed(1)}s', style: TextStyle(fontSize: 10, color: colorScheme.outline.withOpacity(0.7))),
-              ],
-              Text(_formatTime(widget.message.timestamp), style: TextStyle(fontSize: 10, color: colorScheme.outline.withOpacity(0.6))),
+        // Token 统计和时间
+        Wrap(
+          spacing: 12,
+          children: [
+            if (isAI && usage != null) ...[
+              Text('↑${_formatNumber(usage.promptTokens)}', style: TextStyle(fontSize: 10, color: colorScheme.outline.withOpacity(0.6))),
+              Text('↓${_formatNumber(usage.completionTokens)}', style: TextStyle(fontSize: 10, color: colorScheme.outline.withOpacity(0.6))),
+              if (usage.tokensPerSecond > 0) 
+                Text('${usage.tokensPerSecond.toStringAsFixed(1)}/s', style: TextStyle(fontSize: 10, color: colorScheme.outline.withOpacity(0.6))),
             ],
-          ),
+            Text(_formatTime(widget.message.timestamp), style: TextStyle(fontSize: 10, color: colorScheme.outline.withOpacity(0.5))),
+          ],
         ),
         if (isSent) ...[
-          _buildActionButton(icon: Icons.copy, onTap: () {
-            Clipboard.setData(ClipboardData(text: widget.message.content));
-            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('已复制'), duration: Duration(seconds: 1)));
-          }, colorScheme: colorScheme),
-          // 用户消息显示编辑按钮
-          if (isUser && widget.onEdit != null) _buildActionButton(icon: Icons.edit, onTap: widget.onEdit!, colorScheme: colorScheme),
-          // AI消息显示重新生成按钮
-          if (isAI && widget.onRegenerate != null) _buildActionButton(icon: Icons.refresh, onTap: widget.onRegenerate!, colorScheme: colorScheme),
-          if (widget.onDelete != null) _buildActionButton(icon: Icons.delete_outline, onTap: () => _confirmDelete(context), colorScheme: colorScheme, isDestructive: true),
+          const SizedBox(width: 12),
+          // 复制按钮
+          _buildActionButton(
+            icon: Icons.copy,
+            onTap: () {
+              Clipboard.setData(ClipboardData(text: widget.message.content));
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('已复制'), duration: Duration(seconds: 1)),
+              );
+            },
+            colorScheme: colorScheme,
+          ),
+          // 用户消息：编辑按钮
+          if (isUser && widget.onEdit != null)
+            _buildActionButton(icon: Icons.edit, onTap: widget.onEdit!, colorScheme: colorScheme),
+          // AI消息：重新生成按钮
+          if (isAI && widget.onRegenerate != null)
+            _buildActionButton(icon: Icons.refresh, onTap: widget.onRegenerate!, colorScheme: colorScheme),
+          // 删除按钮
+          if (widget.onDelete != null)
+            _buildActionButton(
+              icon: Icons.delete_outline,
+              onTap: () => _confirmDelete(context),
+              colorScheme: colorScheme,
+              isDestructive: true,
+            ),
         ],
       ],
     );
   }
 
-  Widget _buildActionButton({required IconData icon, required VoidCallback onTap, required ColorScheme colorScheme, bool isDestructive = false}) {
+  Widget _buildActionButton({
+    required IconData icon,
+    required VoidCallback onTap,
+    required ColorScheme colorScheme,
+    bool isDestructive = false,
+  }) {
     return GestureDetector(
       onTap: onTap,
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-        child: Icon(icon, size: 18, color: isDestructive ? colorScheme.error.withOpacity(0.7) : colorScheme.outline.withOpacity(0.7)),
+        child: Icon(
+          icon,
+          size: 18,
+          color: isDestructive 
+              ? colorScheme.error.withOpacity(0.7) 
+              : colorScheme.outline.withOpacity(0.6),
+        ),
       ),
     );
   }
@@ -460,7 +663,13 @@ class _MessageBubbleState extends State<MessageBubble> with AutomaticKeepAliveCl
         content: const Text('确定要删除这条消息吗？'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
-          TextButton(onPressed: () { Navigator.pop(ctx); widget.onDelete?.call(); }, child: Text('删除', style: TextStyle(color: Theme.of(ctx).colorScheme.error))),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              widget.onDelete?.call();
+            },
+            child: Text('删除', style: TextStyle(color: Theme.of(ctx).colorScheme.error)),
+          ),
         ],
       ),
     );
