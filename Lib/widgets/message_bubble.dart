@@ -26,64 +26,241 @@ class MessageBubble extends StatefulWidget {
   State<MessageBubble> createState() => _MessageBubbleState();
 }
 
-class _MessageBubbleState extends State<MessageBubble> {
+class _MessageBubbleState extends State<MessageBubble> with AutomaticKeepAliveClientMixin {
   bool _thinkingExpanded = false;
+  
+  // 缓存解析结果
+  String? _cachedContent;
+  List<_ContentBlock>? _cachedBlocks;
+
+  @override
+  bool get wantKeepAlive => true;
 
   @override
   Widget build(BuildContext context) {
+    super.build(context);
+    
     final isUser = widget.message.role == MessageRole.user;
     final colorScheme = Theme.of(context).colorScheme;
+    final isSending = widget.message.status == MessageStatus.sending;
 
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Padding(
-            padding: const EdgeInsets.only(bottom: 4, left: 4),
-            child: Text(
-              isUser ? '你' : 'AI',
-              style: TextStyle(fontSize: 12, color: colorScheme.outline),
+    return RepaintBoundary(
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.only(bottom: 4, left: 4),
+              child: Text(
+                isUser ? '你' : 'AI',
+                style: TextStyle(fontSize: 12, color: colorScheme.outline),
+              ),
             ),
-          ),
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: isUser ? colorScheme.primaryContainer : colorScheme.surfaceContainerHighest,
-              borderRadius: BorderRadius.circular(12),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: isUser ? colorScheme.primaryContainer : colorScheme.surfaceContainerHighest,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (widget.message.attachments.any((a) => a.mimeType.startsWith('image/'))) ...[
+                    _buildImageAttachments(context),
+                    const SizedBox(height: 8),
+                  ],
+                  if (widget.message.attachments.any((a) => !a.mimeType.startsWith('image/'))) ...[
+                    _buildFileAttachments(context),
+                    const SizedBox(height: 8),
+                  ],
+                  if (widget.message.content.isNotEmpty)
+                    // 流式渲染使用简单文本，完成后使用Markdown
+                    isSending 
+                        ? _buildStreamingContent(context)
+                        : _buildCachedContent(context),
+                  if (widget.message.embeddedFiles.isNotEmpty) ...[
+                    const SizedBox(height: 12),
+                    FileAttachmentView(
+                      files: widget.message.embeddedFiles.map((f) => FileAttachmentData(path: f.path, content: f.content, size: f.size)).toList(),
+                    ),
+                  ],
+                  if (isSending)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 8),
+                      child: SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: colorScheme.primary)),
+                    ),
+                  if (widget.message.status == MessageStatus.error) _buildError(context),
+                ],
+              ),
             ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+            Padding(padding: const EdgeInsets.only(top: 6, left: 4, right: 4), child: _buildFooter(context)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // 流式渲染 - 使用简单的 Text，性能更好
+  Widget _buildStreamingContent(BuildContext context) {
+    final isUser = widget.message.role == MessageRole.user;
+    final colorScheme = Theme.of(context).colorScheme;
+    
+    return SelectableText(
+      widget.message.content,
+      style: TextStyle(
+        color: isUser ? colorScheme.onPrimaryContainer : colorScheme.onSurfaceVariant,
+        fontSize: 15,
+        height: 1.5,
+      ),
+    );
+  }
+
+  // 缓存的内容渲染 - 只在内容变化时重新解析
+  Widget _buildCachedContent(BuildContext context) {
+    final content = widget.message.content;
+    
+    // 检查缓存是否有效
+    if (_cachedContent != content) {
+      _cachedContent = content;
+      _cachedBlocks = _parseContent(content);
+    }
+    
+    return SelectionArea(child: _buildParsedContent(context, _cachedBlocks!));
+  }
+
+  // 解析内容为块
+  List<_ContentBlock> _parseContent(String content) {
+    List<_ContentBlock> blocks = [];
+    
+    // 检查思考标签
+    final thinkingRegex = RegExp(r'<think(?:ing)?>([\s\S]*?)</think(?:ing)?>', caseSensitive: false);
+    final thinkMatch = thinkingRegex.firstMatch(content);
+    
+    String mainContent = content;
+    if (thinkMatch != null && widget.message.role != MessageRole.user) {
+      blocks.add(_ContentBlock(type: _BlockType.thinking, content: thinkMatch.group(1) ?? ''));
+      mainContent = content.replaceAll(thinkingRegex, '').trim();
+    }
+    
+    if (mainContent.isEmpty) return blocks;
+    
+    // 解析代码块
+    final codeBlockRegex = RegExp(r'```(\w*)\n?([\s\S]*?)```');
+    final matches = codeBlockRegex.allMatches(mainContent).toList();
+    
+    if (matches.isEmpty) {
+      blocks.add(_ContentBlock(type: _BlockType.markdown, content: mainContent));
+      return blocks;
+    }
+    
+    int lastEnd = 0;
+    for (var match in matches) {
+      if (match.start > lastEnd) {
+        final textBefore = mainContent.substring(lastEnd, match.start).trim();
+        if (textBefore.isNotEmpty) {
+          blocks.add(_ContentBlock(type: _BlockType.markdown, content: textBefore));
+        }
+      }
+      blocks.add(_ContentBlock(
+        type: _BlockType.code,
+        content: (match.group(2) ?? '').trim(),
+        language: match.group(1),
+      ));
+      lastEnd = match.end;
+    }
+    
+    if (lastEnd < mainContent.length) {
+      final textAfter = mainContent.substring(lastEnd).trim();
+      if (textAfter.isNotEmpty) {
+        blocks.add(_ContentBlock(type: _BlockType.markdown, content: textAfter));
+      }
+    }
+    
+    return blocks;
+  }
+
+  Widget _buildParsedContent(BuildContext context, List<_ContentBlock> blocks) {
+    final colorScheme = Theme.of(context).colorScheme;
+    
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: blocks.map((block) {
+        switch (block.type) {
+          case _BlockType.thinking:
+            return _buildThinkingBlock(context, block.content);
+          case _BlockType.code:
+            return CodeBlock(code: block.content, language: block.language);
+          case _BlockType.markdown:
+            return _buildMarkdownBlock(context, block.content);
+        }
+      }).toList(),
+    );
+  }
+
+  Widget _buildThinkingBlock(BuildContext context, String content) {
+    final colorScheme = Theme.of(context).colorScheme;
+    
+    return GestureDetector(
+      onTap: () => setState(() => _thinkingExpanded = !_thinkingExpanded),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+        margin: const EdgeInsets.only(bottom: 8),
+        decoration: BoxDecoration(
+          color: colorScheme.surfaceContainerHighest,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: colorScheme.outline.withOpacity(0.3)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
               children: [
-                if (widget.message.attachments.any((a) => a.mimeType.startsWith('image/'))) ...[
-                  _buildImageAttachments(context),
-                  const SizedBox(height: 8),
-                ],
-                if (widget.message.attachments.any((a) => !a.mimeType.startsWith('image/'))) ...[
-                  _buildFileAttachments(context),
-                  const SizedBox(height: 8),
-                ],
-                if (widget.message.content.isNotEmpty)
-                  SelectionArea(child: _buildContent(context)),
-                if (widget.message.embeddedFiles.isNotEmpty) ...[
-                  const SizedBox(height: 12),
-                  FileAttachmentView(
-                    files: widget.message.embeddedFiles.map((f) => FileAttachmentData(path: f.path, content: f.content, size: f.size)).toList(),
-                  ),
-                ],
-                if (widget.message.status == MessageStatus.sending)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 8),
-                    child: SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: colorScheme.primary)),
-                  ),
-                if (widget.message.status == MessageStatus.error) _buildError(context),
+                Icon(_thinkingExpanded ? Icons.expand_less : Icons.expand_more, size: 20, color: colorScheme.primary),
+                const SizedBox(width: 6),
+                Text('💭 思考过程', style: TextStyle(color: colorScheme.primary, fontWeight: FontWeight.w500)),
+                const Spacer(),
+                Text(_thinkingExpanded ? '点击折叠' : '点击展开', style: TextStyle(fontSize: 12, color: colorScheme.outline)),
               ],
             ),
-          ),
-          Padding(padding: const EdgeInsets.only(top: 6, left: 4, right: 4), child: _buildFooter(context)),
-        ],
+            if (_thinkingExpanded) ...[
+              const SizedBox(height: 8),
+              const Divider(height: 1),
+              const SizedBox(height: 8),
+              Text(content.trim(), style: TextStyle(fontSize: 13, color: colorScheme.onSurfaceVariant.withOpacity(0.8), fontStyle: FontStyle.italic)),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMarkdownBlock(BuildContext context, String content) {
+    final isUser = widget.message.role == MessageRole.user;
+    final colorScheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    return MarkdownBody(
+      data: content,
+      selectable: false, // 外层已有 SelectionArea
+      styleSheet: MarkdownStyleSheet(
+        p: TextStyle(color: isUser ? colorScheme.onPrimaryContainer : colorScheme.onSurfaceVariant, fontSize: 15),
+        h1: TextStyle(color: isUser ? colorScheme.onPrimaryContainer : colorScheme.onSurfaceVariant, fontSize: 22, fontWeight: FontWeight.bold),
+        h2: TextStyle(color: isUser ? colorScheme.onPrimaryContainer : colorScheme.onSurfaceVariant, fontSize: 20, fontWeight: FontWeight.bold),
+        h3: TextStyle(color: isUser ? colorScheme.onPrimaryContainer : colorScheme.onSurfaceVariant, fontSize: 18, fontWeight: FontWeight.bold),
+        strong: TextStyle(color: isUser ? colorScheme.onPrimaryContainer : colorScheme.onSurfaceVariant, fontWeight: FontWeight.bold),
+        em: TextStyle(color: isUser ? colorScheme.onPrimaryContainer : colorScheme.onSurfaceVariant, fontStyle: FontStyle.italic),
+        blockquote: TextStyle(color: colorScheme.outline, fontStyle: FontStyle.italic),
+        blockquoteDecoration: BoxDecoration(border: Border(left: BorderSide(color: colorScheme.primary, width: 3))),
+        blockquotePadding: const EdgeInsets.only(left: 12),
+        code: TextStyle(backgroundColor: isDark ? const Color(0xFF2D2D2D) : const Color(0xFFE8E8E8), fontFamily: 'monospace', fontSize: 13),
+        codeblockDecoration: BoxDecoration(color: isDark ? const Color(0xFF1E1E1E) : const Color(0xFFF5F5F5), borderRadius: BorderRadius.circular(8)),
+        listBullet: TextStyle(color: isUser ? colorScheme.onPrimaryContainer : colorScheme.onSurfaceVariant),
+        tableBorder: TableBorder.all(color: colorScheme.outline.withOpacity(0.5), width: 1),
+        tableColumnWidth: const IntrinsicColumnWidth(),
+        tableCellsPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       ),
     );
   }
@@ -104,6 +281,7 @@ class _MessageBubbleState extends State<MessageBubble> {
               width: 120,
               height: 120,
               fit: BoxFit.cover,
+              cacheWidth: 240, // 添加缓存尺寸优化
               errorBuilder: (ctx, err, stack) => Container(
                 width: 120,
                 height: 120,
@@ -172,113 +350,6 @@ class _MessageBubbleState extends State<MessageBubble> {
         );
       }).toList(),
     );
-  }
-
-  Widget _buildContent(BuildContext context) {
-    final content = widget.message.content;
-    final isUser = widget.message.role == MessageRole.user;
-    final colorScheme = Theme.of(context).colorScheme;
-
-    final thinkingRegex = RegExp(r'<think(?:ing)?>([\s\S]*?)</think(?:ing)?>', caseSensitive: false);
-    final match = thinkingRegex.firstMatch(content);
-
-    if (match != null && !isUser) {
-      final thinkingContent = match.group(1) ?? '';
-      final mainContent = content.replaceAll(thinkingRegex, '').trim();
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          GestureDetector(
-            onTap: () => setState(() => _thinkingExpanded = !_thinkingExpanded),
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-              margin: const EdgeInsets.only(bottom: 8),
-              decoration: BoxDecoration(
-                color: colorScheme.surfaceContainerHighest,
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: colorScheme.outline.withOpacity(0.3)),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Icon(_thinkingExpanded ? Icons.expand_less : Icons.expand_more, size: 20, color: colorScheme.primary),
-                      const SizedBox(width: 6),
-                      Text('💭 思考过程', style: TextStyle(color: colorScheme.primary, fontWeight: FontWeight.w500)),
-                      const Spacer(),
-                      Text(_thinkingExpanded ? '点击折叠' : '点击展开', style: TextStyle(fontSize: 12, color: colorScheme.outline)),
-                    ],
-                  ),
-                  if (_thinkingExpanded) ...[
-                    const SizedBox(height: 8),
-                    const Divider(height: 1),
-                    const SizedBox(height: 8),
-                    Text(thinkingContent.trim(), style: TextStyle(fontSize: 13, color: colorScheme.onSurfaceVariant.withOpacity(0.8), fontStyle: FontStyle.italic)),
-                  ],
-                ],
-              ),
-            ),
-          ),
-          if (mainContent.isNotEmpty) _buildMarkdownContent(context, mainContent),
-        ],
-      );
-    }
-    return _buildMarkdownContent(context, content);
-  }
-
-  Widget _buildMarkdownContent(BuildContext context, String content) {
-    final isUser = widget.message.role == MessageRole.user;
-    final colorScheme = Theme.of(context).colorScheme;
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-
-    if (content.contains('```')) return _buildContentWithCodeBlocks(context, content);
-
-    return MarkdownBody(
-      data: content,
-      selectable: true,
-      styleSheet: MarkdownStyleSheet(
-        p: TextStyle(color: isUser ? colorScheme.onPrimaryContainer : colorScheme.onSurfaceVariant, fontSize: 15),
-        h1: TextStyle(color: isUser ? colorScheme.onPrimaryContainer : colorScheme.onSurfaceVariant, fontSize: 22, fontWeight: FontWeight.bold),
-        h2: TextStyle(color: isUser ? colorScheme.onPrimaryContainer : colorScheme.onSurfaceVariant, fontSize: 20, fontWeight: FontWeight.bold),
-        h3: TextStyle(color: isUser ? colorScheme.onPrimaryContainer : colorScheme.onSurfaceVariant, fontSize: 18, fontWeight: FontWeight.bold),
-        strong: TextStyle(color: isUser ? colorScheme.onPrimaryContainer : colorScheme.onSurfaceVariant, fontWeight: FontWeight.bold),
-        em: TextStyle(color: isUser ? colorScheme.onPrimaryContainer : colorScheme.onSurfaceVariant, fontStyle: FontStyle.italic),
-        blockquote: TextStyle(color: colorScheme.outline, fontStyle: FontStyle.italic),
-        blockquoteDecoration: BoxDecoration(border: Border(left: BorderSide(color: colorScheme.primary, width: 3))),
-        blockquotePadding: const EdgeInsets.only(left: 12),
-        code: TextStyle(backgroundColor: isDark ? const Color(0xFF2D2D2D) : const Color(0xFFE8E8E8), fontFamily: 'monospace', fontSize: 13),
-        codeblockDecoration: BoxDecoration(color: isDark ? const Color(0xFF1E1E1E) : const Color(0xFFF5F5F5), borderRadius: BorderRadius.circular(8)),
-        listBullet: TextStyle(color: isUser ? colorScheme.onPrimaryContainer : colorScheme.onSurfaceVariant),
-        tableBorder: TableBorder.all(color: colorScheme.outline.withOpacity(0.5), width: 1),
-        tableColumnWidth: const IntrinsicColumnWidth(),
-        tableCellsPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      ),
-    );
-  }
-
-  Widget _buildContentWithCodeBlocks(BuildContext context, String content) {
-    final codeBlockRegex = RegExp(r'```(\w*)\n?([\s\S]*?)```');
-    final matches = codeBlockRegex.allMatches(content).toList();
-    if (matches.isEmpty) return _buildMarkdownContent(context, content);
-
-    List<Widget> widgets = [];
-    int lastEnd = 0;
-    for (var match in matches) {
-      if (match.start > lastEnd) {
-        final textBefore = content.substring(lastEnd, match.start).trim();
-        if (textBefore.isNotEmpty) widgets.add(_buildMarkdownContent(context, textBefore));
-      }
-      final language = match.group(1) ?? '';
-      final code = match.group(2) ?? '';
-      widgets.add(CodeBlock(code: code.trim(), language: language.isEmpty ? null : language));
-      lastEnd = match.end;
-    }
-    if (lastEnd < content.length) {
-      final textAfter = content.substring(lastEnd).trim();
-      if (textAfter.isNotEmpty) widgets.add(_buildMarkdownContent(context, textAfter));
-    }
-    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: widgets);
   }
 
   Widget _buildError(BuildContext context) {
@@ -370,4 +441,16 @@ class _MessageBubbleState extends State<MessageBubble> {
     }
     return '${time.month}/${time.day} ${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}';
   }
+}
+
+// 内容块类型
+enum _BlockType { thinking, code, markdown }
+
+// 内容块
+class _ContentBlock {
+  final _BlockType type;
+  final String content;
+  final String? language;
+
+  _ContentBlock({required this.type, required this.content, this.language});
 }
