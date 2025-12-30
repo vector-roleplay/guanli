@@ -181,21 +181,51 @@ class GitHubService {
     }
   }
 
+  // 并行获取目录内容（大幅提升下载速度）
   Future<Map<String, String>> getDirectoryContents(String repo, String path) async {
     Map<String, String> files = {};
     
-    final contents = await getContents(repo, path);
-    for (var item in contents) {
-      if (item.type == 'file') {
-        final content = await getFileContent(repo, item.path);
-        if (content != null) {
-          files[item.path] = content;
+    // 先收集所有文件路径
+    List<GitHubFile> allFiles = [];
+    await _collectAllFiles(repo, path, allFiles);
+    
+    // 并行下载所有文件（限制并发数为10）
+    const int maxConcurrent = 10;
+    for (int i = 0; i < allFiles.length; i += maxConcurrent) {
+      final batch = allFiles.skip(i).take(maxConcurrent).toList();
+      final results = await Future.wait(
+        batch.map((file) async {
+          final content = await getFileContent(repo, file.path);
+          return MapEntry(file.path, content);
+        }),
+      );
+      
+      for (var entry in results) {
+        if (entry.value != null) {
+          files[entry.key] = entry.value!;
         }
-      } else if (item.type == 'dir') {
-        final subFiles = await getDirectoryContents(repo, item.path);
-        files.addAll(subFiles);
       }
     }
+    
     return files;
+  }
+
+  // 递归收集所有文件（只收集路径，不下载内容）
+  Future<void> _collectAllFiles(String repo, String path, List<GitHubFile> allFiles) async {
+    final contents = await getContents(repo, path);
+    
+    // 分离文件和目录
+    final fileItems = contents.where((item) => item.type == 'file').toList();
+    final dirItems = contents.where((item) => item.type == 'dir').toList();
+    
+    // 添加文件
+    allFiles.addAll(fileItems);
+    
+    // 并行处理子目录
+    if (dirItems.isNotEmpty) {
+      await Future.wait(
+        dirItems.map((dir) => _collectAllFiles(repo, dir.path, allFiles)),
+      );
+    }
   }
 }
