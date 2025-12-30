@@ -420,11 +420,13 @@ class _MessageBubbleState extends State<MessageBubble> with AutomaticKeepAliveCl
     );
   }
 
+  Widget _buildMarkdownBlock(BuildContext context, String content) {
     final colorScheme = Theme.of(context).colorScheme;
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return MarkdownBody(
       data: content,
+
       selectable: false,
       softLineBreak: true,
       styleSheet: MarkdownStyleSheet(
