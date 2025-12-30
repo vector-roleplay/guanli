@@ -337,8 +337,33 @@ class _SubChatScreenState extends State<SubChatScreen> {
   }
 
   void _stopGeneration() {
-    setState(() => _stopRequested = true);
+    _stopRequested = true;
+    ApiService.cancelRequest();
+    _streamingMessageId = null;
+    setState(() => _isLoading = false);
+    
+    // 更新最后一条消息状态
+    if (_subConversation.messages.isNotEmpty) {
+      final lastMsg = _subConversation.messages.last;
+      if (lastMsg.role == MessageRole.assistant && lastMsg.status == MessageStatus.sending) {
+        final content = _streamingContent.value;
+        if (content.isNotEmpty) {
+          final msgIndex = _subConversation.messages.indexWhere((m) => m.id == lastMsg.id);
+          if (msgIndex != -1) {
+            _subConversation.messages[msgIndex] = Message(
+              id: lastMsg.id,
+              role: MessageRole.assistant,
+              content: '$content\n\n[已停止生成]',
+              timestamp: lastMsg.timestamp,
+              status: MessageStatus.sent,
+            );
+            SubConversationService.instance.update(_subConversation);
+          }
+        }
+      }
+    }
   }
+
 
   Future<void> _requestAIResponse() async {
     _stopRequested = false;
