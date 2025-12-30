@@ -549,7 +549,7 @@ class _SubChatScreenState extends State<SubChatScreen> {
     }
   }
 
-
+  Future<void> _regenerateMessage(int aiMessageIndex) async {
     _subConversation.messages.removeAt(aiMessageIndex);
     _messageKeys.remove(aiMessageIndex);
     await SubConversationService.instance.update(_subConversation);
@@ -559,6 +559,7 @@ class _SubChatScreenState extends State<SubChatScreen> {
 
   @override
   Widget build(BuildContext context) {
+
     final colorScheme = Theme.of(context).colorScheme;
     final hasMessages = _subConversation.messages.isNotEmpty;
 
