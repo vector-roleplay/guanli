@@ -422,6 +422,13 @@ class _SubChatScreenState extends State<SubChatScreen> {
       await _handleAIResponse(result.content);
 
     } catch (e) {
+      // 如果是主动停止，不显示错误
+      if (_stopRequested) {
+        _streamingMessageId = null;
+        setState(() {});
+        return;
+      }
+      
       _streamingMessageId = null;
       final msgIndex = _subConversation.messages.indexWhere((m) => m.id == aiMessage.id);
       if (msgIndex != -1) {
@@ -432,6 +439,7 @@ class _SubChatScreenState extends State<SubChatScreen> {
     } finally {
       setState(() => _isLoading = false);
     }
+
   }
 
   Future<void> _handleAIResponse(String response) async {
