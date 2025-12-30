@@ -330,39 +330,46 @@ class _MessageBubbleState extends State<MessageBubble> with AutomaticKeepAliveCl
     );
   }
 
-  // 代码块 - 更自然的样式
+  // 代码块 - 整体化样式
   Widget _buildCodeBlock(BuildContext context, String code, String? language) {
     final colorScheme = Theme.of(context).colorScheme;
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    
+    // 代码块背景色
+    final bgColor = isDark ? const Color(0xFF1E1E1E) : const Color(0xFFF6F8FA);
+    // 顶部栏背景色（略深一点）
+    final headerBgColor = isDark ? const Color(0xFF252526) : const Color(0xFFEEF1F4);
 
     return Container(
       margin: const EdgeInsets.symmetric(vertical: 8),
+      clipBehavior: Clip.antiAlias,
       decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF1C1C1E) : const Color(0xFFF5F5F5),
-        borderRadius: BorderRadius.circular(12),
+        color: bgColor,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(
+          color: isDark ? const Color(0xFF3C3C3C) : const Color(0xFFE1E4E8),
+          width: 1,
+        ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // 顶部栏
+          // 顶部栏 - 无边框分隔，通过背景色区分
           Container(
+            width: double.infinity,
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            decoration: BoxDecoration(
-              border: Border(
-                bottom: BorderSide(
-                  color: colorScheme.outline.withOpacity(0.1),
-                ),
-              ),
-            ),
+            color: headerBgColor,
             child: Row(
               children: [
-                Text(
-                  language?.isNotEmpty == true ? language! : 'code',
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: colorScheme.outline,
+                if (language?.isNotEmpty == true)
+                  Text(
+                    language!,
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w500,
+                      color: isDark ? const Color(0xFF8B949E) : const Color(0xFF57606A),
+                    ),
                   ),
-                ),
                 const Spacer(),
                 GestureDetector(
                   onTap: () {
@@ -371,18 +378,29 @@ class _MessageBubbleState extends State<MessageBubble> with AutomaticKeepAliveCl
                       const SnackBar(content: Text('已复制'), duration: Duration(seconds: 1)),
                     );
                   },
-                  child: Text(
-                    '复制代码',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: colorScheme.primary,
-                    ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        Icons.copy_rounded,
+                        size: 14,
+                        color: isDark ? const Color(0xFF8B949E) : const Color(0xFF57606A),
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        '复制',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: isDark ? const Color(0xFF8B949E) : const Color(0xFF57606A),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ],
             ),
           ),
-          // 代码内容
+          // 代码内容 - 无额外装饰
           SingleChildScrollView(
             scrollDirection: Axis.horizontal,
             padding: const EdgeInsets.all(12),
@@ -391,8 +409,9 @@ class _MessageBubbleState extends State<MessageBubble> with AutomaticKeepAliveCl
               style: TextStyle(
                 fontFamily: 'monospace',
                 fontSize: 13,
-                color: isDark ? const Color(0xFFE5E5E5) : const Color(0xFF333333),
+                color: isDark ? const Color(0xFFD4D4D4) : const Color(0xFF24292F),
                 height: 1.5,
+                letterSpacing: 0,
               ),
             ),
           ),
@@ -401,7 +420,6 @@ class _MessageBubbleState extends State<MessageBubble> with AutomaticKeepAliveCl
     );
   }
 
-  Widget _buildMarkdownBlock(BuildContext context, String content) {
     final colorScheme = Theme.of(context).colorScheme;
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
@@ -432,11 +450,16 @@ class _MessageBubbleState extends State<MessageBubble> with AutomaticKeepAliveCl
           color: colorScheme.onSurface,
         ),
         codeblockDecoration: BoxDecoration(
-          color: isDark ? const Color(0xFF1C1C1E) : const Color(0xFFF5F5F5),
-          borderRadius: BorderRadius.circular(12),
+          color: isDark ? const Color(0xFF1E1E1E) : const Color(0xFFF6F8FA),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(
+            color: isDark ? const Color(0xFF3C3C3C) : const Color(0xFFE1E4E8),
+            width: 1,
+          ),
         ),
         codeblockPadding: const EdgeInsets.all(12),
         listBullet: TextStyle(color: colorScheme.onSurface, height: 1.5),
+
         listIndent: 20,
         tableBorder: TableBorder.all(color: colorScheme.outline.withOpacity(0.5), width: 1),
         tableColumnWidth: const IntrinsicColumnWidth(),
