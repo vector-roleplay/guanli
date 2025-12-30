@@ -13,6 +13,7 @@ class MessageBubble extends StatefulWidget {
   final VoidCallback? onRetry;
   final VoidCallback? onDelete;
   final VoidCallback? onRegenerate;
+  final VoidCallback? onEdit;
 
   const MessageBubble({
     super.key,
@@ -20,6 +21,7 @@ class MessageBubble extends StatefulWidget {
     this.onRetry,
     this.onDelete,
     this.onRegenerate,
+    this.onEdit,
   });
 
   @override
@@ -29,12 +31,16 @@ class MessageBubble extends StatefulWidget {
 class _MessageBubbleState extends State<MessageBubble> with AutomaticKeepAliveClientMixin {
   bool _thinkingExpanded = false;
   
-  // 缓存解析结果
   String? _cachedContent;
   List<_ContentBlock>? _cachedBlocks;
 
   @override
   bool get wantKeepAlive => true;
+
+  bool get _isUserStopped {
+    final content = widget.message.content;
+    return content.endsWith('[已停止生成]') || content.contains('\n\n[已停止生成]');
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -77,7 +83,6 @@ class _MessageBubbleState extends State<MessageBubble> with AutomaticKeepAliveCl
                     const SizedBox(height: 8),
                   ],
                   if (widget.message.content.isNotEmpty)
-                    // 流式渲染使用简单文本，完成后使用Markdown
                     isSending 
                         ? _buildStreamingContent(context)
                         : _buildCachedContent(context),
@@ -92,7 +97,7 @@ class _MessageBubbleState extends State<MessageBubble> with AutomaticKeepAliveCl
                       padding: const EdgeInsets.only(top: 8),
                       child: SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: colorScheme.primary)),
                     ),
-                  if (widget.message.status == MessageStatus.error) _buildError(context),
+                  if (widget.message.status == MessageStatus.error && !_isUserStopped) _buildError(context),
                 ],
               ),
             ),
@@ -103,7 +108,6 @@ class _MessageBubbleState extends State<MessageBubble> with AutomaticKeepAliveCl
     );
   }
 
-  // 流式渲染 - 使用简单的 Text，性能更好
   Widget _buildStreamingContent(BuildContext context) {
     final isUser = widget.message.role == MessageRole.user;
     final colorScheme = Theme.of(context).colorScheme;
@@ -113,16 +117,14 @@ class _MessageBubbleState extends State<MessageBubble> with AutomaticKeepAliveCl
       style: TextStyle(
         color: isUser ? colorScheme.onPrimaryContainer : colorScheme.onSurfaceVariant,
         fontSize: 15,
-        height: 1.5,
+        height: 1.6,
       ),
     );
   }
 
-  // 缓存的内容渲染 - 只在内容变化时重新解析
   Widget _buildCachedContent(BuildContext context) {
     final content = widget.message.content;
     
-    // 检查缓存是否有效
     if (_cachedContent != content) {
       _cachedContent = content;
       _cachedBlocks = _parseContent(content);
@@ -131,11 +133,9 @@ class _MessageBubbleState extends State<MessageBubble> with AutomaticKeepAliveCl
     return SelectionArea(child: _buildParsedContent(context, _cachedBlocks!));
   }
 
-  // 解析内容为块
   List<_ContentBlock> _parseContent(String content) {
     List<_ContentBlock> blocks = [];
     
-    // 检查思考标签
     final thinkingRegex = RegExp(r'<think(?:ing)?>([\s\S]*?)</think(?:ing)?>', caseSensitive: false);
     final thinkMatch = thinkingRegex.firstMatch(content);
     
@@ -147,7 +147,6 @@ class _MessageBubbleState extends State<MessageBubble> with AutomaticKeepAliveCl
     
     if (mainContent.isEmpty) return blocks;
     
-    // 解析代码块
     final codeBlockRegex = RegExp(r'```(\w*)\n?([\s\S]*?)```');
     final matches = codeBlockRegex.allMatches(mainContent).toList();
     
@@ -183,8 +182,6 @@ class _MessageBubbleState extends State<MessageBubble> with AutomaticKeepAliveCl
   }
 
   Widget _buildParsedContent(BuildContext context, List<_ContentBlock> blocks) {
-    final colorScheme = Theme.of(context).colorScheme;
-    
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: blocks.map((block) {
@@ -229,7 +226,7 @@ class _MessageBubbleState extends State<MessageBubble> with AutomaticKeepAliveCl
               const SizedBox(height: 8),
               const Divider(height: 1),
               const SizedBox(height: 8),
-              Text(content.trim(), style: TextStyle(fontSize: 13, color: colorScheme.onSurfaceVariant.withOpacity(0.8), fontStyle: FontStyle.italic)),
+              Text(content.trim(), style: TextStyle(fontSize: 13, color: colorScheme.onSurfaceVariant.withOpacity(0.8), fontStyle: FontStyle.italic, height: 1.5)),
             ],
           ],
         ),
@@ -244,23 +241,38 @@ class _MessageBubbleState extends State<MessageBubble> with AutomaticKeepAliveCl
 
     return MarkdownBody(
       data: content,
-      selectable: false, // 外层已有 SelectionArea
+      selectable: false,
+      softLineBreak: true,
       styleSheet: MarkdownStyleSheet(
-        p: TextStyle(color: isUser ? colorScheme.onPrimaryContainer : colorScheme.onSurfaceVariant, fontSize: 15),
-        h1: TextStyle(color: isUser ? colorScheme.onPrimaryContainer : colorScheme.onSurfaceVariant, fontSize: 22, fontWeight: FontWeight.bold),
-        h2: TextStyle(color: isUser ? colorScheme.onPrimaryContainer : colorScheme.onSurfaceVariant, fontSize: 20, fontWeight: FontWeight.bold),
-        h3: TextStyle(color: isUser ? colorScheme.onPrimaryContainer : colorScheme.onSurfaceVariant, fontSize: 18, fontWeight: FontWeight.bold),
+        p: TextStyle(
+          color: isUser ? colorScheme.onPrimaryContainer : colorScheme.onSurfaceVariant, 
+          fontSize: 15,
+          height: 1.6,
+        ),
+        h1: TextStyle(color: isUser ? colorScheme.onPrimaryContainer : colorScheme.onSurfaceVariant, fontSize: 22, fontWeight: FontWeight.bold, height: 1.4),
+        h2: TextStyle(color: isUser ? colorScheme.onPrimaryContainer : colorScheme.onSurfaceVariant, fontSize: 20, fontWeight: FontWeight.bold, height: 1.4),
+        h3: TextStyle(color: isUser ? colorScheme.onPrimaryContainer : colorScheme.onSurfaceVariant, fontSize: 18, fontWeight: FontWeight.bold, height: 1.4),
         strong: TextStyle(color: isUser ? colorScheme.onPrimaryContainer : colorScheme.onSurfaceVariant, fontWeight: FontWeight.bold),
         em: TextStyle(color: isUser ? colorScheme.onPrimaryContainer : colorScheme.onSurfaceVariant, fontStyle: FontStyle.italic),
-        blockquote: TextStyle(color: colorScheme.outline, fontStyle: FontStyle.italic),
+        blockquote: TextStyle(color: colorScheme.outline, fontStyle: FontStyle.italic, height: 1.5),
         blockquoteDecoration: BoxDecoration(border: Border(left: BorderSide(color: colorScheme.primary, width: 3))),
         blockquotePadding: const EdgeInsets.only(left: 12),
-        code: TextStyle(backgroundColor: isDark ? const Color(0xFF2D2D2D) : const Color(0xFFE8E8E8), fontFamily: 'monospace', fontSize: 13),
-        codeblockDecoration: BoxDecoration(color: isDark ? const Color(0xFF1E1E1E) : const Color(0xFFF5F5F5), borderRadius: BorderRadius.circular(8)),
-        listBullet: TextStyle(color: isUser ? colorScheme.onPrimaryContainer : colorScheme.onSurfaceVariant),
+        code: TextStyle(
+          backgroundColor: isDark ? const Color(0xFF2D2D2D) : const Color(0xFFE8E8E8), 
+          fontFamily: 'monospace', 
+          fontSize: 13,
+        ),
+        codeblockDecoration: BoxDecoration(
+          color: isDark ? const Color(0xFF1E1E1E) : const Color(0xFFF5F5F5), 
+          borderRadius: BorderRadius.circular(8),
+        ),
+        codeblockPadding: const EdgeInsets.all(12),
+        listBullet: TextStyle(color: isUser ? colorScheme.onPrimaryContainer : colorScheme.onSurfaceVariant, height: 1.5),
+        listIndent: 20,
         tableBorder: TableBorder.all(color: colorScheme.outline.withOpacity(0.5), width: 1),
         tableColumnWidth: const IntrinsicColumnWidth(),
         tableCellsPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        pPadding: const EdgeInsets.only(bottom: 8),
       ),
     );
   }
@@ -281,7 +293,7 @@ class _MessageBubbleState extends State<MessageBubble> with AutomaticKeepAliveCl
               width: 120,
               height: 120,
               fit: BoxFit.cover,
-              cacheWidth: 240, // 添加缓存尺寸优化
+              cacheWidth: 240,
               errorBuilder: (ctx, err, stack) => Container(
                 width: 120,
                 height: 120,
@@ -392,10 +404,10 @@ class _MessageBubbleState extends State<MessageBubble> with AutomaticKeepAliveCl
     );
   }
 
-
   Widget _buildFooter(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     final usage = widget.message.tokenUsage;
+    final isUser = widget.message.role == MessageRole.user;
     final isAI = widget.message.role == MessageRole.assistant;
     final isSent = widget.message.status == MessageStatus.sent;
 
@@ -420,6 +432,9 @@ class _MessageBubbleState extends State<MessageBubble> with AutomaticKeepAliveCl
             Clipboard.setData(ClipboardData(text: widget.message.content));
             ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('已复制'), duration: Duration(seconds: 1)));
           }, colorScheme: colorScheme),
+          // 用户消息显示编辑按钮
+          if (isUser && widget.onEdit != null) _buildActionButton(icon: Icons.edit, onTap: widget.onEdit!, colorScheme: colorScheme),
+          // AI消息显示重新生成按钮
           if (isAI && widget.onRegenerate != null) _buildActionButton(icon: Icons.refresh, onTap: widget.onRegenerate!, colorScheme: colorScheme),
           if (widget.onDelete != null) _buildActionButton(icon: Icons.delete_outline, onTap: () => _confirmDelete(context), colorScheme: colorScheme, isDestructive: true),
         ],
@@ -465,10 +480,8 @@ class _MessageBubbleState extends State<MessageBubble> with AutomaticKeepAliveCl
   }
 }
 
-// 内容块类型
 enum _BlockType { thinking, code, markdown }
 
-// 内容块
 class _ContentBlock {
   final _BlockType type;
   final String content;
