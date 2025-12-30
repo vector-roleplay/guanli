@@ -46,9 +46,7 @@ class _MainChatScreenState extends State<MainChatScreen> {
   String? _streamingMessageId;
   
   DateTime _lastUIUpdate = DateTime.now();
-  static const Duration _uiUpdateInterval = Duration(milliseconds: 150); // 降低更新频率
-  String _pendingContent = '';
-
+  static const Duration _uiUpdateInterval = Duration(milliseconds: 150);
 
   @override
   void initState() {
@@ -89,7 +87,6 @@ class _MainChatScreenState extends State<MainChatScreen> {
     _streamingContent.dispose();
     super.dispose();
   }
-
 
   Future<void> _loadDirectoryTree() async {
     final tree = await DatabaseService.instance.getDirectoryTree();
@@ -297,8 +294,8 @@ class _MainChatScreenState extends State<MainChatScreen> {
       setState(() {});
       _scrollToBottom();
       await _checkAndNavigateToSub(result.content);
-
     } catch (e) {
+      _streamingMessageId = null;
       final msgIndex = _currentConversation!.messages.indexWhere((m) => m.id == aiMessage.id);
       if (msgIndex != -1) {
         _currentConversation!.messages[msgIndex] = Message(id: aiMessage.id, role: MessageRole.assistant, content: '发送失败: $e', timestamp: aiMessage.timestamp, status: MessageStatus.error);
@@ -417,75 +414,77 @@ class _MainChatScreenState extends State<MainChatScreen> {
       drawer: _buildDrawer(context),
       body: Stack(
         children: [
-          Column(children: [
-            Expanded(
-              child: !hasMessages
-                ? Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [Icon(Icons.chat_bubble_outline, size: 64, color: colorScheme.outline), const SizedBox(height: 16), Text('开始新对话', style: TextStyle(fontSize: 18, color: colorScheme.outline))]))
-                : NotificationListener<ScrollNotification>(
-                    onNotification: (notification) {
-                      if (notification is ScrollStartNotification) _userScrolling = true;
-                      else if (notification is ScrollEndNotification) {
-                        _userScrolling = false;
-                        if (_scrollController.hasClients) {
-                          final maxScroll = _scrollController.position.maxScrollExtent;
-                          final currentScroll = _scrollController.offset;
-                          if ((maxScroll - currentScroll) < 50) setState(() => _isNearBottom = true);
-                        }
-                      }
-                      return false;
-                    },
-                    child: ListView.builder(
-                      controller: _scrollController,
-                      padding: const EdgeInsets.symmetric(vertical: 16),
-                      itemCount: _currentConversation!.messages.length,
-                      itemBuilder: (context, index) {
-                        _messageKeys[index] ??= GlobalKey();
-                        final message = _currentConversation!.messages[index];
-                        
-                        // 如果是正在流式生成的消息，使用 ValueListenableBuilder 局部更新
-                        if (message.id == _streamingMessageId) {
-                          return Container(
-                            key: _messageKeys[index],
-                            child: ValueListenableBuilder<String>(
-                              valueListenable: _streamingContent,
-                              builder: (context, content, _) {
-                                final streamingMsg = Message(
-                                  id: message.id,
-                                  role: MessageRole.assistant,
-                                  content: content,
-                                  timestamp: message.timestamp,
-                                  status: MessageStatus.sending,
-                                );
-                                return MessageBubble(message: streamingMsg);
-                              },
-                            ),
-                          );
-                        }
-                        
-                        return Container(
-                          key: _messageKeys[index],
-                          child: MessageBubble(
-                            message: message,
-                            onRetry: message.status == MessageStatus.error ? () => _sendMessage(message.content, message.attachments) : null,
-                            onDelete: () => _deleteMessage(index),
-                            onRegenerate: message.role == MessageRole.assistant && message.status == MessageStatus.sent ? () => _regenerateMessage(index) : null,
-                          ),
-                        );
-                      },
-                    ),
-
-                      itemCount: _currentConversation!.messages.length,
-                      itemBuilder: (context, index) {
-                        _messageKeys[index] ??= GlobalKey();
-                        final message = _currentConversation!.messages[index];
-                        return Container(key: _messageKeys[index], child: MessageBubble(message: message, onRetry: message.status == MessageStatus.error ? () => _sendMessage(message.content, message.attachments) : null, onDelete: () => _deleteMessage(index), onRegenerate: message.role == MessageRole.assistant && message.status == MessageStatus.sent ? () => _regenerateMessage(index) : null));
-                      },
-                    ),
-                  ),
-            ),
-            ChatInput(onSend: _sendMessage, enabled: !_isLoading, isGenerating: _isLoading, onStop: _stopGeneration),
-
-          ]),
+          Column(
+            children: [
+              Expanded(
+                child: !hasMessages
+                    ? Center(
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(Icons.chat_bubble_outline, size: 64, color: colorScheme.outline),
+                            const SizedBox(height: 16),
+                            Text('开始新对话', style: TextStyle(fontSize: 18, color: colorScheme.outline)),
+                          ],
+                        ),
+                      )
+                    : NotificationListener<ScrollNotification>(
+                        onNotification: (notification) {
+                          if (notification is ScrollStartNotification) _userScrolling = true;
+                          else if (notification is ScrollEndNotification) {
+                            _userScrolling = false;
+                            if (_scrollController.hasClients) {
+                              final maxScroll = _scrollController.position.maxScrollExtent;
+                              final currentScroll = _scrollController.offset;
+                              if ((maxScroll - currentScroll) < 50) setState(() => _isNearBottom = true);
+                            }
+                          }
+                          return false;
+                        },
+                        child: ListView.builder(
+                          controller: _scrollController,
+                          padding: const EdgeInsets.symmetric(vertical: 16),
+                          itemCount: _currentConversation!.messages.length,
+                          itemBuilder: (context, index) {
+                            _messageKeys[index] ??= GlobalKey();
+                            final message = _currentConversation!.messages[index];
+                            
+                            // 如果是正在流式生成的消息，使用 ValueListenableBuilder 局部更新
+                            if (message.id == _streamingMessageId) {
+                              return Container(
+                                key: _messageKeys[index],
+                                child: ValueListenableBuilder<String>(
+                                  valueListenable: _streamingContent,
+                                  builder: (context, content, _) {
+                                    final streamingMsg = Message(
+                                      id: message.id,
+                                      role: MessageRole.assistant,
+                                      content: content,
+                                      timestamp: message.timestamp,
+                                      status: MessageStatus.sending,
+                                    );
+                                    return MessageBubble(message: streamingMsg);
+                                  },
+                                ),
+                              );
+                            }
+                            
+                            return Container(
+                              key: _messageKeys[index],
+                              child: MessageBubble(
+                                message: message,
+                                onRetry: message.status == MessageStatus.error ? () => _sendMessage(message.content, message.attachments) : null,
+                                onDelete: () => _deleteMessage(index),
+                                onRegenerate: message.role == MessageRole.assistant && message.status == MessageStatus.sent ? () => _regenerateMessage(index) : null,
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+              ),
+              ChatInput(onSend: _sendMessage, enabled: !_isLoading, isGenerating: _isLoading, onStop: _stopGeneration),
+            ],
+          ),
           if (_showScrollButtons && hasMessages)
             Positioned(
               bottom: 80,
@@ -495,7 +494,6 @@ class _MainChatScreenState extends State<MainChatScreen> {
                 child: ScrollButtons(onScrollToTop: _scrollToTop, onScrollToBottom: _forceScrollToBottom, onPreviousMessage: _scrollToPreviousMessage, onNextMessage: _scrollToNextMessage),
               ),
             ),
-
         ],
       ),
     );
