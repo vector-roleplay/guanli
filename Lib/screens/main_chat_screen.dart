@@ -41,9 +41,14 @@ class _MainChatScreenState extends State<MainChatScreen> {
   Timer? _hideButtonsTimer;
   final Map<int, GlobalKey> _messageKeys = {};
   
+  // 流式消息专用 - 避免整个列表重建
+  final ValueNotifier<String> _streamingContent = ValueNotifier('');
+  String? _streamingMessageId;
+  
   DateTime _lastUIUpdate = DateTime.now();
-  static const Duration _uiUpdateInterval = Duration(milliseconds: 100);
+  static const Duration _uiUpdateInterval = Duration(milliseconds: 150); // 降低更新频率
   String _pendingContent = '';
+
 
   @override
   void initState() {
@@ -81,8 +86,10 @@ class _MainChatScreenState extends State<MainChatScreen> {
     _hideButtonsTimer?.cancel();
     _scrollController.removeListener(_onScroll);
     _scrollController.dispose();
+    _streamingContent.dispose();
     super.dispose();
   }
+
 
   Future<void> _loadDirectoryTree() async {
     final tree = await DatabaseService.instance.getDirectoryTree();
