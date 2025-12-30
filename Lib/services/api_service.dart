@@ -34,10 +34,24 @@ class StreamResult {
 }
 
 class ApiService {
+  // 用于取消请求的 client
+  static http.Client? _activeClient;
+  static bool _isCancelled = false;
+
+  // 取消当前请求
+  static void cancelRequest() {
+    _isCancelled = true;
+    _activeClient?.close();
+    _activeClient = null;
+  }
+
+  // 重置取消状态
+  static void _resetCancelState() {
+    _isCancelled = false;
+  }
+
   // 估算token数（1 token ≈ 4字符，中文约2字符）
   static int estimateTokens(String text) {
-    // 简单估算：英文约4字符/token，中文约2字符/token
-    // 取平均值约3字符/token
     return (text.length / 3).ceil();
   }
 
@@ -111,10 +125,13 @@ class ApiService {
     required String directoryTree,
     required Function(String) onChunk,
   }) async {
+    _resetCancelState();
+    
     final url = Uri.parse('$apiUrl/chat/completions');
 
     List<Map<String, dynamic>> apiMessages = [];
     int totalInputLength = 0;
+    bool hasImages = false;
 
     // 系统消息
     if (systemPrompt.isNotEmpty || directoryTree.isNotEmpty) {
@@ -132,72 +149,102 @@ class ApiService {
       totalInputLength += systemContent.length;
     }
 
-    // 对话消息
+    // 对话消息（异步处理附件）
     for (var msg in messages) {
-      final apiFormat = msg.toApiFormat();
+      // 检查是否有图片
+      if (msg.attachments.any((a) => a.isImage)) {
+        hasImages = true;
+      }
+      
+      final apiFormat = await msg.toApiFormatAsync();
       apiMessages.add(apiFormat);
-      totalInputLength += (apiFormat['content'] as String).length;
-    }
-
-    // 估算输入token
-    final estimatedPromptTokens = estimateTokens(totalInputLength.toString()) > 0 
-        ? (totalInputLength / 3).ceil() 
-        : 0;
-
-    final request = http.Request('POST', url);
-    request.headers['Content-Type'] = 'application/json';
-    request.headers['Authorization'] = 'Bearer $apiKey';
-    request.body = jsonEncode({
-      'model': model,
-      'messages': apiMessages,
-      'max_tokens': 8192,
-      'stream': true,
-    });
-
-    final response = await http.Client().send(request);
-
-    if (response.statusCode != 200) {
-      final body = await response.stream.bytesToString();
-      throw Exception('API请求失败: ${response.statusCode} - $body');
-    }
-
-    StringBuffer fullContent = StringBuffer();
-
-    await for (var chunk in response.stream.transform(utf8.decoder)) {
-      final lines = chunk.split('\n');
-      for (var line in lines) {
-        if (line.startsWith('data: ')) {
-          final data = line.substring(6).trim();
-          if (data == '[DONE]') {
-            break;
-          }
-          if (data.isNotEmpty) {
-            try {
-              final json = jsonDecode(data);
-              final delta = json['choices']?[0]?['delta'];
-              if (delta != null) {
-                final content = delta['content'];
-                if (content != null && content.isNotEmpty) {
-                  fullContent.write(content);
-                  onChunk(content);
-                }
-              }
-            } catch (e) {
-              // 解析错误，跳过
-            }
+      
+      // 估算长度
+      if (apiFormat['content'] is String) {
+        totalInputLength += (apiFormat['content'] as String).length;
+      } else if (apiFormat['content'] is List) {
+        for (var part in apiFormat['content']) {
+          if (part['type'] == 'text') {
+            totalInputLength += (part['text'] as String).length;
+          } else if (part['type'] == 'image_url') {
+            totalInputLength += 1000; // 图片估算
           }
         }
       }
     }
 
-    final outputContent = fullContent.toString();
-    final estimatedCompletionTokens = estimateTokens(outputContent);
+    // 估算输入token
+    final estimatedPromptTokens = (totalInputLength / 3).ceil();
 
-    return StreamResult(
-      content: outputContent,
-      estimatedPromptTokens: (totalInputLength / 3).ceil(),
-      estimatedCompletionTokens: estimatedCompletionTokens,
-    );
+    // 创建可取消的 client
+    _activeClient = http.Client();
+    
+    try {
+      final request = http.Request('POST', url);
+      request.headers['Content-Type'] = 'application/json';
+      request.headers['Authorization'] = 'Bearer $apiKey';
+      request.body = jsonEncode({
+        'model': model,
+        'messages': apiMessages,
+        'max_tokens': 8192,
+        'stream': true,
+      });
+
+      final response = await _activeClient!.send(request);
+
+      if (response.statusCode != 200) {
+        final body = await response.stream.bytesToString();
+        throw Exception('API请求失败: ${response.statusCode} - $body');
+      }
+
+      StringBuffer fullContent = StringBuffer();
+
+      await for (var chunk in response.stream.transform(utf8.decoder)) {
+        // 检查是否已取消
+        if (_isCancelled) {
+          break;
+        }
+        
+        final lines = chunk.split('\n');
+        for (var line in lines) {
+          if (_isCancelled) break;
+          
+          if (line.startsWith('data: ')) {
+            final data = line.substring(6).trim();
+            if (data == '[DONE]') {
+              break;
+            }
+            if (data.isNotEmpty) {
+              try {
+                final json = jsonDecode(data);
+                final delta = json['choices']?[0]?['delta'];
+                if (delta != null) {
+                  final content = delta['content'];
+                  if (content != null && content.isNotEmpty) {
+                    fullContent.write(content);
+                    onChunk(content);
+                  }
+                }
+              } catch (e) {
+                // 解析错误，跳过
+              }
+            }
+          }
+        }
+      }
+
+      final outputContent = fullContent.toString();
+      final estimatedCompletionTokens = estimateTokens(outputContent);
+
+      return StreamResult(
+        content: outputContent,
+        estimatedPromptTokens: estimatedPromptTokens,
+        estimatedCompletionTokens: estimatedCompletionTokens,
+      );
+    } finally {
+      _activeClient?.close();
+      _activeClient = null;
+    }
   }
 
   // 保留原来的流式方法（兼容）
@@ -363,7 +410,8 @@ class ApiService {
     }
 
     for (var msg in messages) {
-      apiMessages.add(msg.toApiFormat());
+      final apiFormat = await msg.toApiFormatAsync();
+      apiMessages.add(apiFormat);
     }
 
     final response = await http.post(
