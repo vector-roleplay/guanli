@@ -1,8 +1,10 @@
 // Lib/screens/main_chat_screen.dart
 
 import 'dart:async';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import '../models/message.dart';
+
 import '../models/conversation.dart';
 import '../models/sub_conversation.dart';
 import '../config/app_config.dart';
@@ -186,54 +188,63 @@ class _MainChatScreenState extends State<MainChatScreen> {
     final message = _currentConversation!.messages[index];
     if (message.role != MessageRole.user) return;
     
-    final controller = TextEditingController(text: message.content);
-    final result = await showDialog<String>(
+    final result = await showDialog<Map<String, dynamic>>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('编辑消息'),
-        content: TextField(
-          controller: controller,
-          maxLines: null,
-          minLines: 3,
-          decoration: const InputDecoration(
-            hintText: '输入消息内容...',
-            border: OutlineInputBorder(),
-          ),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, controller.text.trim()),
-            child: const Text('保存并重新发送'),
-          ),
-        ],
+      builder: (ctx) => _EditMessageDialog(
+        initialContent: message.content,
+        attachments: List.from(message.attachments),
+        embeddedFiles: List.from(message.embeddedFiles),
       ),
     );
-    controller.dispose();
     
-    if (result != null && result.isNotEmpty && result != message.content) {
-      // 删除该消息及之后的所有消息
-      while (_currentConversation!.messages.length > index) {
-        _currentConversation!.messages.removeLast();
-      }
-      _messageKeys.clear();
+    if (result != null) {
+      final newContent = result['content'] as String;
+      final newAttachments = result['attachments'] as List<FileAttachment>;
+      final newEmbeddedFiles = result['embeddedFiles'] as List<EmbeddedFile>;
+      final shouldResend = result['resend'] as bool;
       
-      // 添加编辑后的消息
-      final editedMessage = Message(
-        role: MessageRole.user,
-        content: result,
-        fullContent: message.fullContent != null ? result : null,
-        attachments: message.attachments,
-        embeddedFiles: message.embeddedFiles,
-        status: MessageStatus.sent,
-      );
-      _currentConversation!.messages.add(editedMessage);
-      await ConversationService.instance.update(_currentConversation!);
-      setState(() {});
-      _scrollToBottom();
-      await _sendMessageToAI();
+      if (shouldResend) {
+        // 删除该消息及之后的所有消息，重新发送
+        while (_currentConversation!.messages.length > index) {
+          _currentConversation!.messages.removeLast();
+        }
+        _messageKeys.clear();
+        
+        // 添加编辑后的消息
+        final editedMessage = Message(
+          role: MessageRole.user,
+          content: newContent,
+          fullContent: message.fullContent,
+          attachments: newAttachments,
+          embeddedFiles: newEmbeddedFiles,
+          status: MessageStatus.sent,
+        );
+        _currentConversation!.messages.add(editedMessage);
+        await ConversationService.instance.update(_currentConversation!);
+        setState(() {});
+        _scrollToBottom();
+        await _sendMessageToAI();
+      } else {
+        // 仅保存，不重发，不删除后续消息
+        final msgIndex = _currentConversation!.messages.indexWhere((m) => m.id == message.id);
+        if (msgIndex != -1) {
+          _currentConversation!.messages[msgIndex] = Message(
+            id: message.id,
+            role: MessageRole.user,
+            content: newContent,
+            fullContent: message.fullContent,
+            timestamp: message.timestamp,
+            attachments: newAttachments,
+            embeddedFiles: newEmbeddedFiles,
+            status: MessageStatus.sent,
+          );
+          await ConversationService.instance.update(_currentConversation!);
+          setState(() {});
+        }
+      }
     }
   }
+
 
   Future<void> _regenerateMessage(int aiMessageIndex) async {
     if (_currentConversation == null) return;
@@ -926,4 +937,240 @@ class _MainChatScreenState extends State<MainChatScreen> {
       ),
     );
   }
+}// 编辑消息对话框
+class _EditMessageDialog extends StatefulWidget {
+  final String initialContent;
+  final List<FileAttachment> attachments;
+  final List<EmbeddedFile> embeddedFiles;
+
+  const _EditMessageDialog({
+    required this.initialContent,
+    required this.attachments,
+    required this.embeddedFiles,
+  });
+
+  @override
+  State<_EditMessageDialog> createState() => _EditMessageDialogState();
 }
+
+class _EditMessageDialogState extends State<_EditMessageDialog> {
+  late TextEditingController _controller;
+  late List<FileAttachment> _attachments;
+  late List<EmbeddedFile> _embeddedFiles;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(text: widget.initialContent);
+    _attachments = List.from(widget.attachments);
+    _embeddedFiles = List.from(widget.embeddedFiles);
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    
+    return AlertDialog(
+      title: const Text('编辑消息'),
+      content: SizedBox(
+        width: double.maxFinite,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // 消息内容
+              TextField(
+                controller: _controller,
+                maxLines: null,
+                minLines: 3,
+                decoration: const InputDecoration(
+                  hintText: '输入消息内容...',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              
+              // 图片附件
+              if (_attachments.any((a) => a.mimeType.startsWith('image/'))) ...[
+                const SizedBox(height: 16),
+                Text('图片', style: TextStyle(fontSize: 12, color: colorScheme.outline)),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: _attachments
+                      .where((a) => a.mimeType.startsWith('image/'))
+                      .map((att) => _buildImageThumbnail(att))
+                      .toList(),
+                ),
+              ],
+              
+              // 文件附件
+              if (_attachments.any((a) => !a.mimeType.startsWith('image/'))) ...[
+                const SizedBox(height: 16),
+                Text('文件', style: TextStyle(fontSize: 12, color: colorScheme.outline)),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: _attachments
+                      .where((a) => !a.mimeType.startsWith('image/'))
+                      .map((att) => _buildFileChip(att))
+                      .toList(),
+                ),
+              ],
+              
+              // 内嵌文件
+              if (_embeddedFiles.isNotEmpty) ...[
+                const SizedBox(height: 16),
+                Text('内嵌文件', style: TextStyle(fontSize: 12, color: colorScheme.outline)),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: _embeddedFiles
+                      .map((f) => _buildEmbeddedFileChip(f))
+                      .toList(),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('取消'),
+        ),
+        TextButton(
+          onPressed: () {
+            Navigator.pop(context, {
+              'content': _controller.text.trim(),
+              'attachments': _attachments,
+              'embeddedFiles': _embeddedFiles,
+              'resend': false,
+            });
+          },
+          child: const Text('仅保存'),
+        ),
+        FilledButton(
+          onPressed: () {
+            Navigator.pop(context, {
+              'content': _controller.text.trim(),
+              'attachments': _attachments,
+              'embeddedFiles': _embeddedFiles,
+              'resend': true,
+            });
+          },
+          child: const Text('保存并重发'),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildImageThumbnail(FileAttachment att) {
+    return Stack(
+      children: [
+        ClipRRect(
+          borderRadius: BorderRadius.circular(8),
+          child: Image.file(
+            File(att.path),
+            width: 60,
+            height: 75,
+            fit: BoxFit.cover,
+            errorBuilder: (ctx, err, stack) => Container(
+              width: 60,
+              height: 75,
+              color: Colors.grey[300],
+              child: const Icon(Icons.broken_image),
+            ),
+          ),
+        ),
+        Positioned(
+          top: -4,
+          right: -4,
+          child: GestureDetector(
+            onTap: () => setState(() => _attachments.remove(att)),
+            child: Container(
+              padding: const EdgeInsets.all(2),
+              decoration: const BoxDecoration(
+                color: Colors.red,
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.close, size: 14, color: Colors.white),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildFileChip(FileAttachment att) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.insert_drive_file, size: 16, color: colorScheme.primary),
+          const SizedBox(width: 6),
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 100),
+            child: Text(
+              att.name,
+              style: const TextStyle(fontSize: 12),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          const SizedBox(width: 6),
+          GestureDetector(
+            onTap: () => setState(() => _attachments.remove(att)),
+            child: Icon(Icons.close, size: 16, color: colorScheme.error),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildEmbeddedFileChip(EmbeddedFile file) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.code, size: 16, color: colorScheme.primary),
+          const SizedBox(width: 6),
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 100),
+            child: Text(
+              file.fileName,
+              style: const TextStyle(fontSize: 12),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          const SizedBox(width: 6),
+          GestureDetector(
+            onTap: () => setState(() => _embeddedFiles.remove(file)),
+            child: Icon(Icons.close, size: 16, color: colorScheme.error),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
