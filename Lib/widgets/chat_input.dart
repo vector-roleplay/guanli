@@ -98,26 +98,9 @@ class _ChatInputState extends State<ChatInput> {
       }
     }
   }
- catch (e) {
-              // 无法读取为文本
-            }
-          }
-
-          setState(() {
-            _attachments.add(FileAttachment(
-              name: file.name,
-              path: file.path!,
-              mimeType: mimeType,
-              size: file.size,
-              content: content,
-            ));
-          });
-        }
-      }
-    }
-  }
 
   Future<void> _pickImage() async {
+
     final picker = ImagePicker();
     
     showModalBottomSheet(
