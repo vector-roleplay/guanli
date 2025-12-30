@@ -250,6 +250,49 @@ class DatabaseService {
     );
   }
 
+  // 获取所有根目录（仓库）
+  Future<List<String>> getRootDirectories() async {
+    final results = await db.query(
+      'files',
+      columns: ['path'],
+      where: 'parent_path IS NULL AND is_directory = 1',
+      orderBy: 'name',
+    );
+    return results.map((r) => r['path'] as String).toList();
+  }
+
+  // 获取指定目录下的所有文件（包含内容）
+  Future<List<Map<String, dynamic>>> getFilesByDirectory(String dirPath) async {
+    return await db.query(
+      'files',
+      columns: ['path', 'name', 'content', 'size'],
+      where: '(path LIKE ? OR path = ?) AND is_directory = 0 AND content IS NOT NULL',
+      whereArgs: ['$dirPath/%', dirPath],
+      orderBy: 'path',
+    );
+  }
+
+  // 获取单个文件信息（包含内容）
+  Future<Map<String, dynamic>?> getFileByPath(String path) async {
+    final results = await db.query(
+      'files',
+      columns: ['path', 'name', 'content', 'size'],
+      where: 'path = ? AND is_directory = 0',
+      whereArgs: [path],
+    );
+    return results.isNotEmpty ? results.first : null;
+  }
+
+  // 获取所有文件列表（不含内容，用于选择器）
+  Future<List<Map<String, dynamic>>> getAllFilesList() async {
+    return await db.query(
+      'files',
+      columns: ['path', 'name', 'size', 'is_directory', 'parent_path'],
+      orderBy: 'path',
+    );
+  }
+
+
   // 从 GitHub 导入文件
   Future<void> importGitHubFile(String path, String content) async {
     final name = path.split('/').last;
