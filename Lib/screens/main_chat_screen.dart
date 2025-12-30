@@ -259,34 +259,32 @@ class _MainChatScreenState extends State<MainChatScreen> {
     _stopRequested = false;
     final aiMessage = Message(role: MessageRole.assistant, content: '', status: MessageStatus.sending);
     _currentConversation!.messages.add(aiMessage);
+    _streamingMessageId = aiMessage.id;
+    _streamingContent.value = '';
     setState(() => _isLoading = true);
     _scrollToBottom();
     final stopwatch = Stopwatch()..start();
     
     try {
       String fullContent = '';
-      _pendingContent = '';
       
       final result = await ApiService.streamToMainAIWithTokens(
         messages: _currentConversation!.messages.where((m) => m.status != MessageStatus.sending).toList(),
         directoryTree: _directoryTree,
         onChunk: (chunk) {
           fullContent += chunk;
-          _pendingContent = fullContent;
           final now = DateTime.now();
           if (now.difference(_lastUIUpdate) >= _uiUpdateInterval) {
             _lastUIUpdate = now;
-            final msgIndex = _currentConversation!.messages.indexWhere((m) => m.id == aiMessage.id);
-            if (msgIndex != -1) {
-              _currentConversation!.messages[msgIndex] = Message(id: aiMessage.id, role: MessageRole.assistant, content: _pendingContent, timestamp: aiMessage.timestamp, status: MessageStatus.sending);
-              setState(() {});
-              _scrollToBottom();
-            }
+            // 使用 ValueNotifier 局部更新，不触发整个列表重建
+            _streamingContent.value = fullContent;
+            _scrollToBottom();
           }
         },
       );
       
       stopwatch.stop();
+      _streamingMessageId = null;
       
       final msgIndex = _currentConversation!.messages.indexWhere((m) => m.id == aiMessage.id);
       if (msgIndex != -1) {
@@ -299,6 +297,7 @@ class _MainChatScreenState extends State<MainChatScreen> {
       setState(() {});
       _scrollToBottom();
       await _checkAndNavigateToSub(result.content);
+
     } catch (e) {
       final msgIndex = _currentConversation!.messages.indexWhere((m) => m.id == aiMessage.id);
       if (msgIndex != -1) {
@@ -438,6 +437,43 @@ class _MainChatScreenState extends State<MainChatScreen> {
                     child: ListView.builder(
                       controller: _scrollController,
                       padding: const EdgeInsets.symmetric(vertical: 16),
+                      itemCount: _currentConversation!.messages.length,
+                      itemBuilder: (context, index) {
+                        _messageKeys[index] ??= GlobalKey();
+                        final message = _currentConversation!.messages[index];
+                        
+                        // 如果是正在流式生成的消息，使用 ValueListenableBuilder 局部更新
+                        if (message.id == _streamingMessageId) {
+                          return Container(
+                            key: _messageKeys[index],
+                            child: ValueListenableBuilder<String>(
+                              valueListenable: _streamingContent,
+                              builder: (context, content, _) {
+                                final streamingMsg = Message(
+                                  id: message.id,
+                                  role: MessageRole.assistant,
+                                  content: content,
+                                  timestamp: message.timestamp,
+                                  status: MessageStatus.sending,
+                                );
+                                return MessageBubble(message: streamingMsg);
+                              },
+                            ),
+                          );
+                        }
+                        
+                        return Container(
+                          key: _messageKeys[index],
+                          child: MessageBubble(
+                            message: message,
+                            onRetry: message.status == MessageStatus.error ? () => _sendMessage(message.content, message.attachments) : null,
+                            onDelete: () => _deleteMessage(index),
+                            onRegenerate: message.role == MessageRole.assistant && message.status == MessageStatus.sent ? () => _regenerateMessage(index) : null,
+                          ),
+                        );
+                      },
+                    ),
+
                       itemCount: _currentConversation!.messages.length,
                       itemBuilder: (context, index) {
                         _messageKeys[index] ??= GlobalKey();
