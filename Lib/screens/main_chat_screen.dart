@@ -192,29 +192,39 @@ class _MainChatScreenState extends State<MainChatScreen> {
 
   Future<void> _sendAllFiles() async {
     if (_currentConversation == null) return;
-    final files = await DatabaseService.instance.getAllFilesWithContent();
-    if (files.isEmpty) {
+    
+    // 获取所有根目录（仓库）
+    final rootDirs = await DatabaseService.instance.getRootDirectories();
+    final allFiles = await DatabaseService.instance.getAllFilesList();
+    
+    if (allFiles.isEmpty) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('数据库中没有文件')));
       return;
     }
-    final confirm = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('发送所有文件'),
-        content: Text('确定要发送数据库中的 ${files.length} 个文件给AI吗？'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
-          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('发送')),
-        ],
-      ),
-    );
-    if (confirm != true) return;
 
-    String displayContent = '【发送所有文件】共 ${files.length} 个文件\n\n【文件目录】\n$_directoryTree';
-    String fullContent = '【发送所有文件】共 ${files.length} 个文件\n\n【文件目录】\n$_directoryTree\n\n【文件内容】\n';
+    // 显示选择对话框
+    final selectedFiles = await _showFileSelectionDialog(rootDirs, allFiles);
+    if (selectedFiles == null || selectedFiles.isEmpty) return;
+
+    // 获取选中文件的内容
+    List<Map<String, dynamic>> filesToSend = [];
+    for (var path in selectedFiles) {
+      final file = await DatabaseService.instance.getFileByPath(path);
+      if (file != null) {
+        filesToSend.add(file);
+      }
+    }
+
+    if (filesToSend.isEmpty) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('选中的文件没有内容')));
+      return;
+    }
+
+    String displayContent = '【发送文件】共 ${filesToSend.length} 个文件\n\n【文件目录】\n$_directoryTree';
+    String fullContent = '【发送文件】共 ${filesToSend.length} 个文件\n\n【文件目录】\n$_directoryTree\n\n【文件内容】\n';
     List<EmbeddedFile> embeddedFiles = [];
     embeddedFiles.add(EmbeddedFile(path: '📁 文件目录.txt', content: _directoryTree, size: _directoryTree.length));
-    for (var file in files) {
+    for (var file in filesToSend) {
       final path = file['path'] as String;
       final content = file['content'] as String? ?? '';
       final size = file['size'] as int? ?? content.length;
@@ -233,6 +243,248 @@ class _MainChatScreenState extends State<MainChatScreen> {
     _scrollToBottom();
     await _sendMessageToAI();
   }
+
+  Future<List<String>?> _showFileSelectionDialog(List<String> rootDirs, List<Map<String, dynamic>> allFiles) async {
+    // 按目录分组文件
+    Map<String, List<Map<String, dynamic>>> groupedFiles = {};
+    List<Map<String, dynamic>> rootFiles = [];
+    
+    for (var file in allFiles) {
+      if (file['is_directory'] == 1) continue;
+      final path = file['path'] as String;
+      final parentPath = file['parent_path'] as String?;
+      
+      if (parentPath == null) {
+        rootFiles.add(file);
+      } else {
+        // 找到根目录
+        String rootDir = path.split('/').first;
+        groupedFiles.putIfAbsent(rootDir, () => []);
+        groupedFiles[rootDir]!.add(file);
+      }
+    }
+
+    // 选中状态
+    Set<String> selectedPaths = {};
+    Set<String> selectedDirs = {};
+
+    return await showModalBottomSheet<List<String>>(
+      context: context,
+      isScrollControlled: true,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setModalState) {
+          // 计算每个目录的文件数
+          int getTotalFilesInDir(String dir) {
+            return groupedFiles[dir]?.length ?? 0;
+          }
+
+          // 检查目录是否全选
+          bool isDirFullySelected(String dir) {
+            final files = groupedFiles[dir] ?? [];
+            if (files.isEmpty) return false;
+            return files.every((f) => selectedPaths.contains(f['path']));
+          }
+
+          // 检查目录是否部分选中
+          bool isDirPartiallySelected(String dir) {
+            final files = groupedFiles[dir] ?? [];
+            if (files.isEmpty) return false;
+            final selectedCount = files.where((f) => selectedPaths.contains(f['path'])).length;
+            return selectedCount > 0 && selectedCount < files.length;
+          }
+
+          // 切换目录选择
+          void toggleDir(String dir) {
+            final files = groupedFiles[dir] ?? [];
+            if (isDirFullySelected(dir)) {
+              for (var f in files) {
+                selectedPaths.remove(f['path']);
+              }
+              selectedDirs.remove(dir);
+            } else {
+              for (var f in files) {
+                selectedPaths.add(f['path'] as String);
+              }
+              selectedDirs.add(dir);
+            }
+            setModalState(() {});
+          }
+
+          // 全选/全不选
+          void toggleAll() {
+            if (selectedPaths.length == allFiles.where((f) => f['is_directory'] != 1).length) {
+              selectedPaths.clear();
+              selectedDirs.clear();
+            } else {
+              for (var f in allFiles) {
+                if (f['is_directory'] != 1) {
+                  selectedPaths.add(f['path'] as String);
+                }
+              }
+              selectedDirs.addAll(groupedFiles.keys);
+            }
+            setModalState(() {});
+          }
+
+          final colorScheme = Theme.of(ctx).colorScheme;
+          final totalFiles = allFiles.where((f) => f['is_directory'] != 1).length;
+
+          return DraggableScrollableSheet(
+            initialChildSize: 0.7,
+            minChildSize: 0.4,
+            maxChildSize: 0.95,
+            expand: false,
+            builder: (ctx, scrollController) => Column(
+              children: [
+                // 标题栏
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    border: Border(bottom: BorderSide(color: colorScheme.outline.withOpacity(0.2))),
+                  ),
+                  child: Row(
+                    children: [
+                      const Text('选择要发送的文件', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                      const Spacer(),
+                      TextButton(
+                        onPressed: toggleAll,
+                        child: Text(selectedPaths.length == totalFiles ? '取消全选' : '全选'),
+                      ),
+                    ],
+                  ),
+                ),
+                // 选中统计
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  color: colorScheme.primaryContainer.withOpacity(0.3),
+                  child: Row(
+                    children: [
+                      Icon(Icons.check_circle, size: 18, color: colorScheme.primary),
+                      const SizedBox(width: 8),
+                      Text('已选择 ${selectedPaths.length} / $totalFiles 个文件', style: TextStyle(color: colorScheme.primary)),
+                    ],
+                  ),
+                ),
+                // 文件列表
+                Expanded(
+                  child: ListView(
+                    controller: scrollController,
+                    children: [
+                      // 根目录文件
+                      if (rootFiles.isNotEmpty) ...[
+                        const Padding(
+                          padding: EdgeInsets.fromLTRB(16, 12, 16, 4),
+                          child: Text('根目录', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                        ),
+                        ...rootFiles.map((file) => CheckboxListTile(
+                          value: selectedPaths.contains(file['path']),
+                          onChanged: (v) {
+                            setModalState(() {
+                              if (v == true) {
+                                selectedPaths.add(file['path'] as String);
+                              } else {
+                                selectedPaths.remove(file['path']);
+                              }
+                            });
+                          },
+                          title: Text(file['name'] as String, style: const TextStyle(fontSize: 14)),
+                          subtitle: Text(_formatSize(file['size'] as int? ?? 0), style: TextStyle(fontSize: 12, color: colorScheme.outline)),
+                          dense: true,
+                          controlAffinity: ListTileControlAffinity.leading,
+                        )),
+                      ],
+                      // 按仓库分组
+                      ...groupedFiles.entries.map((entry) {
+                        final dir = entry.key;
+                        final files = entry.value;
+                        final isExpanded = selectedDirs.contains(dir) || isDirPartiallySelected(dir);
+                        
+                        return ExpansionTile(
+                          leading: Checkbox(
+                            value: isDirFullySelected(dir) ? true : (isDirPartiallySelected(dir) ? null : false),
+                            tristate: true,
+                            onChanged: (_) => toggleDir(dir),
+                          ),
+                          title: Row(
+                            children: [
+                              Icon(Icons.folder, size: 20, color: colorScheme.primary),
+                              const SizedBox(width: 8),
+                              Expanded(child: Text(dir, style: const TextStyle(fontWeight: FontWeight.w500))),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: colorScheme.secondaryContainer,
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+                                child: Text('${files.length}', style: TextStyle(fontSize: 12, color: colorScheme.onSecondaryContainer)),
+                              ),
+                            ],
+                          ),
+                          initiallyExpanded: isExpanded,
+                          children: files.map((file) => CheckboxListTile(
+                            value: selectedPaths.contains(file['path']),
+                            onChanged: (v) {
+                              setModalState(() {
+                                if (v == true) {
+                                  selectedPaths.add(file['path'] as String);
+                                } else {
+                                  selectedPaths.remove(file['path']);
+                                }
+                              });
+                            },
+                            title: Text(file['name'] as String, style: const TextStyle(fontSize: 14)),
+                            subtitle: Text(
+                              '${file['path']}\n${_formatSize(file['size'] as int? ?? 0)}',
+                              style: TextStyle(fontSize: 11, color: colorScheme.outline),
+                            ),
+                            isThreeLine: true,
+                            dense: true,
+                            controlAffinity: ListTileControlAffinity.leading,
+                          )).toList(),
+                        );
+                      }),
+                    ],
+                  ),
+                ),
+                // 底部按钮
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    border: Border(top: BorderSide(color: colorScheme.outline.withOpacity(0.2))),
+                  ),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton(
+                          onPressed: () => Navigator.pop(ctx),
+                          child: const Text('取消'),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        flex: 2,
+                        child: FilledButton(
+                          onPressed: selectedPaths.isEmpty ? null : () => Navigator.pop(ctx, selectedPaths.toList()),
+                          child: Text('发送 (${selectedPaths.length})'),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  String _formatSize(int size) {
+    if (size < 1024) return '$size B';
+    if (size < 1024 * 1024) return '${(size / 1024).toStringAsFixed(1)} KB';
+    return '${(size / (1024 * 1024)).toStringAsFixed(1)} MB';
+  }
+
 
   Future<void> _sendMessage(String text, List<FileAttachment> attachments) async {
     if (text.isEmpty && attachments.isEmpty) return;
