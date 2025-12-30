@@ -48,14 +48,12 @@ class _SubChatScreenState extends State<SubChatScreen> {
   
   final Map<int, GlobalKey> _messageKeys = {};
   
-  // 节流控制
-  DateTime _lastUIUpdate = DateTime.now();
-  static const Duration _uiUpdateInterval = Duration(milliseconds: 150);
-  
   // 流式消息专用
   final ValueNotifier<String> _streamingContent = ValueNotifier('');
   String? _streamingMessageId;
-
+  
+  DateTime _lastUIUpdate = DateTime.now();
+  static const Duration _uiUpdateInterval = Duration(milliseconds: 150);
 
   @override
   void initState() {
@@ -78,22 +76,14 @@ class _SubChatScreenState extends State<SubChatScreen> {
     final nearBottom = (maxScroll - currentScroll) < 50;
     
     if (nearBottom != _isNearBottom) {
-      setState(() {
-        _isNearBottom = nearBottom;
-      });
+      setState(() => _isNearBottom = nearBottom);
     }
     
-    setState(() {
-      _showScrollButtons = true;
-    });
+    setState(() => _showScrollButtons = true);
     
     _hideButtonsTimer?.cancel();
     _hideButtonsTimer = Timer(const Duration(seconds: 1), () {
-      if (mounted) {
-        setState(() {
-          _showScrollButtons = false;
-        });
-      }
+      if (mounted) setState(() => _showScrollButtons = false);
     });
   }
 
@@ -106,10 +96,8 @@ class _SubChatScreenState extends State<SubChatScreen> {
     super.dispose();
   }
 
-
   void _scrollToBottom() {
     if (_userScrolling || !_isNearBottom) return;
-    
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_scrollController.hasClients) {
         _scrollController.animateTo(
@@ -123,11 +111,7 @@ class _SubChatScreenState extends State<SubChatScreen> {
 
   void _scrollToTop() {
     if (_scrollController.hasClients) {
-      _scrollController.animateTo(
-        0,
-        duration: const Duration(milliseconds: 300),
-        curve: Curves.easeOut,
-      );
+      _scrollController.animateTo(0, duration: const Duration(milliseconds: 300), curve: Curves.easeOut);
     }
   }
 
@@ -138,18 +122,14 @@ class _SubChatScreenState extends State<SubChatScreen> {
         duration: const Duration(milliseconds: 300),
         curve: Curves.easeOut,
       );
-      setState(() {
-        _isNearBottom = true;
-      });
+      setState(() => _isNearBottom = true);
     }
   }
 
   void _scrollToPreviousMessage() {
     if (!_scrollController.hasClients) return;
-    
     final currentOffset = _scrollController.offset;
     double targetOffset = 0;
-    
     for (int i = _subConversation.messages.length - 1; i >= 0; i--) {
       final key = _messageKeys[i];
       if (key?.currentContext != null) {
@@ -164,20 +144,13 @@ class _SubChatScreenState extends State<SubChatScreen> {
         }
       }
     }
-    
-    _scrollController.animateTo(
-      targetOffset,
-      duration: const Duration(milliseconds: 300),
-      curve: Curves.easeOut,
-    );
+    _scrollController.animateTo(targetOffset, duration: const Duration(milliseconds: 300), curve: Curves.easeOut);
   }
 
   void _scrollToNextMessage() {
     if (!_scrollController.hasClients) return;
-    
     final currentOffset = _scrollController.offset;
     double targetOffset = _scrollController.position.maxScrollExtent;
-    
     for (int i = 0; i < _subConversation.messages.length; i++) {
       final key = _messageKeys[i];
       if (key?.currentContext != null) {
@@ -192,12 +165,7 @@ class _SubChatScreenState extends State<SubChatScreen> {
         }
       }
     }
-    
-    _scrollController.animateTo(
-      targetOffset,
-      duration: const Duration(milliseconds: 300),
-      curve: Curves.easeOut,
-    );
+    _scrollController.animateTo(targetOffset, duration: const Duration(milliseconds: 300), curve: Curves.easeOut);
   }
 
   Future<void> _initializeChat() async {
@@ -221,53 +189,31 @@ class _SubChatScreenState extends State<SubChatScreen> {
     String fullContent = '【申请${_subConversation.levelName}子界面】\n$message\n\n【文件目录】\n${widget.directoryTree}$warningText';
     
     List<EmbeddedFile> embeddedFiles = [];
-    
-    embeddedFiles.add(EmbeddedFile(
-      path: '📁 文件目录.txt',
-      content: widget.directoryTree,
-      size: widget.directoryTree.length,
-    ));
+    embeddedFiles.add(EmbeddedFile(path: '📁 文件目录.txt', content: widget.directoryTree, size: widget.directoryTree.length));
     
     if (fileContents.isEmpty) {
       fullContent += '\n\n【注意】未找到请求的文件';
-      await _sendSystemMessage(
-        displayContent: displayContent,
-        fullContent: fullContent,
-        embeddedFiles: embeddedFiles,
-      );
+      await _sendSystemMessage(displayContent: displayContent, fullContent: fullContent, embeddedFiles: embeddedFiles);
     } else if (!exceedsLimit) {
       fullContent += '\n\n【文件内容】\n';
       for (var file in fileContents) {
         fullContent += '--- ${file.path} ---\n${file.content}\n\n';
         embeddedFiles.add(EmbeddedFile(path: file.path, content: file.content, size: file.size));
       }
-
-      await _sendSystemMessage(
-        displayContent: displayContent,
-        fullContent: fullContent,
-        embeddedFiles: embeddedFiles,
-      );
+      await _sendSystemMessage(displayContent: displayContent, fullContent: fullContent, embeddedFiles: embeddedFiles);
     } else {
       await _sendFilesInChunks(displayContent, fullContent, fileContents, warningText, embeddedFiles);
     }
   }
 
-  Future<void> _sendFilesInChunks(
-    String baseDisplayContent,
-    String baseFullContent,
-    List<FileContent> files,
-    String warningText,
-    List<EmbeddedFile> baseEmbeddedFiles,
-  ) async {
+  Future<void> _sendFilesInChunks(String baseDisplayContent, String baseFullContent, List<FileContent> files, String warningText, List<EmbeddedFile> baseEmbeddedFiles) async {
     int sentTokens = 0;
     int totalTokens = files.fold<int>(0, (sum, f) => sum + ApiService.estimateTokens(f.content));
-    
     List<FileContent> currentBatch = [];
     int currentBatchTokens = 0;
 
     for (var file in files) {
       int fileTokens = ApiService.estimateTokens(file.content);
-      
       if (fileTokens > AppConfig.maxTokens) {
         if (currentBatch.isNotEmpty) {
           await _sendBatch(baseDisplayContent, baseFullContent, currentBatch, sentTokens, totalTokens, warningText, baseEmbeddedFiles);
@@ -287,21 +233,12 @@ class _SubChatScreenState extends State<SubChatScreen> {
         currentBatchTokens += fileTokens;
       }
     }
-
     if (currentBatch.isNotEmpty) {
       await _sendBatch(baseDisplayContent, baseFullContent, currentBatch, sentTokens, totalTokens, warningText, baseEmbeddedFiles);
     }
   }
 
-  Future<void> _sendBatch(
-    String baseDisplayContent,
-    String baseFullContent,
-    List<FileContent> batch,
-    int sentTokens,
-    int totalTokens,
-    String warningText,
-    List<EmbeddedFile> baseEmbeddedFiles,
-  ) async {
+  Future<void> _sendBatch(String baseDisplayContent, String baseFullContent, List<FileContent> batch, int sentTokens, int totalTokens, String warningText, List<EmbeddedFile> baseEmbeddedFiles) async {
     int batchTokens = batch.fold<int>(0, (sum, f) => sum + ApiService.estimateTokens(f.content));
     int newSentTokens = sentTokens + batchTokens;
     int percentage = ((newSentTokens / totalTokens) * 100).round();
@@ -318,26 +255,11 @@ class _SubChatScreenState extends State<SubChatScreen> {
       embeddedFiles.add(EmbeddedFile(path: file.path, content: file.content, size: file.size));
     }
 
-    await _sendSystemMessage(
-      displayContent: displayContent,
-      fullContent: fullContent,
-      embeddedFiles: embeddedFiles,
-    );
-
-    if (percentage < 100) {
-      await _waitForContinue();
-    }
+    await _sendSystemMessage(displayContent: displayContent, fullContent: fullContent, embeddedFiles: embeddedFiles);
+    if (percentage < 100) await _waitForContinue();
   }
 
-  Future<void> _sendLargeFile(
-    String baseDisplayContent,
-    String baseFullContent,
-    FileContent file,
-    int sentTokens,
-    int totalTokens,
-    String warningText,
-    List<EmbeddedFile> baseEmbeddedFiles,
-  ) async {
+  Future<void> _sendLargeFile(String baseDisplayContent, String baseFullContent, FileContent file, int sentTokens, int totalTokens, String warningText, List<EmbeddedFile> baseEmbeddedFiles) async {
     final chunks = _splitContentByTokens(file.content, AppConfig.maxTokens);
     int chunksSent = 0;
     int fileTokens = ApiService.estimateTokens(file.content);
@@ -351,21 +273,10 @@ class _SubChatScreenState extends State<SubChatScreen> {
       fullContent += '\n\n本次文件已发送$overallPercentage%$warningText';
 
       List<EmbeddedFile> embeddedFiles = List.from(baseEmbeddedFiles);
-      embeddedFiles.add(EmbeddedFile(
-        path: '${file.path} (第$chunksSent/${chunks.length}部分)',
-        content: chunk,
-        size: chunk.length,
-      ));
+      embeddedFiles.add(EmbeddedFile(path: '${file.path} (第$chunksSent/${chunks.length}部分)', content: chunk, size: chunk.length));
 
-      await _sendSystemMessage(
-        displayContent: displayContent,
-        fullContent: fullContent,
-        embeddedFiles: embeddedFiles,
-      );
-
-      if (chunksSent < chunks.length) {
-        await _waitForContinue();
-      }
+      await _sendSystemMessage(displayContent: displayContent, fullContent: fullContent, embeddedFiles: embeddedFiles);
+      if (chunksSent < chunks.length) await _waitForContinue();
     }
   }
 
@@ -377,14 +288,12 @@ class _SubChatScreenState extends State<SubChatScreen> {
 
     for (var line in lines) {
       int lineTokens = ApiService.estimateTokens(line);
-      
       if (lineTokens > maxTokens) {
         if (currentChunk.isNotEmpty) {
           chunks.add(currentChunk.toString());
           currentChunk.clear();
           currentTokens = 0;
         }
-        
         int charsPerChunk = maxTokens * 3;
         for (int i = 0; i < line.length; i += charsPerChunk) {
           final end = (i + charsPerChunk > line.length) ? line.length : i + charsPerChunk;
@@ -400,11 +309,7 @@ class _SubChatScreenState extends State<SubChatScreen> {
         currentTokens += lineTokens;
       }
     }
-
-    if (currentChunk.isNotEmpty) {
-      chunks.add(currentChunk.toString());
-    }
-
+    if (currentChunk.isNotEmpty) chunks.add(currentChunk.toString());
     return chunks;
   }
 
@@ -413,57 +318,35 @@ class _SubChatScreenState extends State<SubChatScreen> {
     while (attempts < 60) {
       await Future.delayed(const Duration(milliseconds: 500));
       attempts++;
-      
       if (_subConversation.messages.isNotEmpty) {
         final lastMessage = _subConversation.messages.last;
-        if (lastMessage.role == MessageRole.assistant &&
-            lastMessage.status == MessageStatus.sent &&
-            lastMessage.content.contains('【请继续】')) {
+        if (lastMessage.role == MessageRole.assistant && lastMessage.status == MessageStatus.sent && lastMessage.content.contains('【请继续】')) {
           break;
         }
       }
     }
   }
 
-  Future<void> _sendSystemMessage({
-    required String displayContent,
-    required String fullContent,
-    List<EmbeddedFile>? embeddedFiles,
-  }) async {
-    final systemMessage = Message(
-      role: MessageRole.user,
-      content: displayContent,
-      fullContent: fullContent,
-      embeddedFiles: embeddedFiles ?? [],
-      status: MessageStatus.sent,
-    );
+  Future<void> _sendSystemMessage({required String displayContent, required String fullContent, List<EmbeddedFile>? embeddedFiles}) async {
+    final systemMessage = Message(role: MessageRole.user, content: displayContent, fullContent: fullContent, embeddedFiles: embeddedFiles ?? [], status: MessageStatus.sent);
     _subConversation.messages.add(systemMessage);
     await SubConversationService.instance.update(_subConversation);
     setState(() {});
     _scrollToBottom();
-
     await _requestAIResponse();
   }
 
   void _stopGeneration() {
-    setState(() {
-      _stopRequested = true;
-    });
+    setState(() => _stopRequested = true);
   }
 
   Future<void> _requestAIResponse() async {
     _stopRequested = false;
-    final aiMessage = Message(
-      role: MessageRole.assistant,
-      content: '',
-      status: MessageStatus.sending,
-    );
+    final aiMessage = Message(role: MessageRole.assistant, content: '', status: MessageStatus.sending);
     _subConversation.messages.add(aiMessage);
     _streamingMessageId = aiMessage.id;
     _streamingContent.value = '';
-    setState(() {
-      _isLoading = true;
-    });
+    setState(() => _isLoading = true);
     _scrollToBottom();
 
     final stopwatch = Stopwatch()..start();
@@ -472,14 +355,11 @@ class _SubChatScreenState extends State<SubChatScreen> {
       String fullResponseContent = '';
       
       final result = await ApiService.streamToSubAIWithTokens(
-        messages: _subConversation.messages
-            .where((m) => m.status != MessageStatus.sending)
-            .toList(),
+        messages: _subConversation.messages.where((m) => m.status != MessageStatus.sending).toList(),
         directoryTree: widget.directoryTree,
         level: _subConversation.level,
         onChunk: (chunk) {
           fullResponseContent += chunk;
-          
           final now = DateTime.now();
           if (now.difference(_lastUIUpdate) >= _uiUpdateInterval) {
             _lastUIUpdate = now;
@@ -491,37 +371,6 @@ class _SubChatScreenState extends State<SubChatScreen> {
 
       stopwatch.stop();
       _streamingMessageId = null;
-
-      final msgIndex = _subConversation.messages.indexWhere((m) => m.id == aiMessage.id);
-
-            if (msgIndex != -1) {
-              _subConversation.messages[msgIndex] = Message(
-                id: aiMessage.id,
-                role: MessageRole.assistant,
-                content: _pendingContent,
-                timestamp: aiMessage.timestamp,
-                status: MessageStatus.sending,
-              );
-              setState(() {});
-              _scrollToBottom();
-            }
-          }
-        },
-      );
-      
-      // 确保最后一次更新
-      final msgIndexFinal = _subConversation.messages.indexWhere((m) => m.id == aiMessage.id);
-      if (msgIndexFinal != -1 && _pendingContent.isNotEmpty) {
-        _subConversation.messages[msgIndexFinal] = Message(
-          id: aiMessage.id,
-          role: MessageRole.assistant,
-          content: _pendingContent,
-          timestamp: aiMessage.timestamp,
-          status: MessageStatus.sending,
-        );
-      }
-
-      stopwatch.stop();
 
       final msgIndex = _subConversation.messages.indexWhere((m) => m.id == aiMessage.id);
       if (msgIndex != -1) {
@@ -543,38 +392,27 @@ class _SubChatScreenState extends State<SubChatScreen> {
       await SubConversationService.instance.update(_subConversation);
       setState(() {});
       _scrollToBottom();
-
       await _handleAIResponse(result.content);
 
     } catch (e) {
+      _streamingMessageId = null;
       final msgIndex = _subConversation.messages.indexWhere((m) => m.id == aiMessage.id);
       if (msgIndex != -1) {
-        _subConversation.messages[msgIndex] = Message(
-          id: aiMessage.id,
-          role: MessageRole.assistant,
-          content: '发送失败: $e',
-          timestamp: aiMessage.timestamp,
-          status: MessageStatus.error,
-        );
+        _subConversation.messages[msgIndex] = Message(id: aiMessage.id, role: MessageRole.assistant, content: '发送失败: $e', timestamp: aiMessage.timestamp, status: MessageStatus.error);
       }
       await SubConversationService.instance.update(_subConversation);
       setState(() {});
     } finally {
-      setState(() {
-        _isLoading = false;
-      });
+      setState(() => _isLoading = false);
     }
   }
 
   Future<void> _handleAIResponse(String response) async {
     final returnLevel = _detector.detectReturnRequest(response);
     if (returnLevel == _subConversation.level) {
-      if (mounted) {
-        Navigator.pop(context, {'message': response});
-      }
+      if (mounted) Navigator.pop(context, {'message': response});
       return;
     }
-
     final requestedLevel = _detector.detectSubLevelRequest(response);
     if (requestedLevel == _subConversation.level + 1) {
       final paths = _detector.extractPaths(response);
@@ -604,38 +442,25 @@ class _SubChatScreenState extends State<SubChatScreen> {
     if (result != null && result['message'] != null && result['message'].isNotEmpty) {
       await _handleReturnFromChild(result['message']);
     }
-    
     setState(() {});
   }
 
   Future<void> _handleReturnFromChild(String message) async {
-    final returnMessage = Message(
-      role: MessageRole.assistant,
-      content: message,
-      status: MessageStatus.sent,
-    );
+    final returnMessage = Message(role: MessageRole.assistant, content: message, status: MessageStatus.sent);
     _subConversation.messages.add(returnMessage);
     await SubConversationService.instance.update(_subConversation);
     setState(() {});
     _scrollToBottom();
-
     await _handleAIResponse(message);
   }
 
   Future<void> _sendMessage(String text, List<FileAttachment> attachments) async {
     if (text.isEmpty && attachments.isEmpty) return;
-
-    final userMessage = Message(
-      role: MessageRole.user,
-      content: text,
-      attachments: attachments,
-      status: MessageStatus.sent,
-    );
+    final userMessage = Message(role: MessageRole.user, content: text, attachments: attachments, status: MessageStatus.sent);
     _subConversation.messages.add(userMessage);
     await SubConversationService.instance.update(_subConversation);
     setState(() {});
     _scrollToBottom();
-
     await _requestAIResponse();
   }
 
@@ -663,22 +488,13 @@ class _SubChatScreenState extends State<SubChatScreen> {
       appBar: AppBar(
         title: Text(_subConversation.title),
         centerTitle: true,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back),
-          onPressed: () => Navigator.pop(context, null),
-        ),
+        leading: IconButton(icon: const Icon(Icons.arrow_back), onPressed: () => Navigator.pop(context, null)),
         actions: [
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
             margin: const EdgeInsets.only(right: 8),
-            decoration: BoxDecoration(
-              color: colorScheme.secondaryContainer,
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Text(
-              _subConversation.levelName,
-              style: TextStyle(fontSize: 12, color: colorScheme.onSecondaryContainer),
-            ),
+            decoration: BoxDecoration(color: colorScheme.secondaryContainer, borderRadius: BorderRadius.circular(12)),
+            child: Text(_subConversation.levelName, style: TextStyle(fontSize: 12, color: colorScheme.onSecondaryContainer)),
           ),
         ],
       ),
@@ -690,30 +506,18 @@ class _SubChatScreenState extends State<SubChatScreen> {
                 child: !hasMessages
                     ? Center(
                         child: widget.isResuming
-                            ? Column(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  Icon(Icons.history, size: 48, color: colorScheme.outline),
-                                  const SizedBox(height: 16),
-                                  Text('会话已恢复', style: TextStyle(color: colorScheme.outline)),
-                                ],
-                              )
+                            ? Column(mainAxisAlignment: MainAxisAlignment.center, children: [Icon(Icons.history, size: 48, color: colorScheme.outline), const SizedBox(height: 16), Text('会话已恢复', style: TextStyle(color: colorScheme.outline))])
                             : const CircularProgressIndicator(),
                       )
                     : NotificationListener<ScrollNotification>(
                         onNotification: (notification) {
-                          if (notification is ScrollStartNotification) {
-                            _userScrolling = true;
-                          } else if (notification is ScrollEndNotification) {
+                          if (notification is ScrollStartNotification) _userScrolling = true;
+                          else if (notification is ScrollEndNotification) {
                             _userScrolling = false;
                             if (_scrollController.hasClients) {
                               final maxScroll = _scrollController.position.maxScrollExtent;
                               final currentScroll = _scrollController.offset;
-                              if ((maxScroll - currentScroll) < 50) {
-                                setState(() {
-                                  _isNearBottom = true;
-                                });
-                              }
+                              if ((maxScroll - currentScroll) < 50) setState(() => _isNearBottom = true);
                             }
                           }
                           return false;
@@ -726,20 +530,13 @@ class _SubChatScreenState extends State<SubChatScreen> {
                             _messageKeys[index] ??= GlobalKey();
                             final message = _subConversation.messages[index];
                             
-                            // 流式消息局部更新
                             if (message.id == _streamingMessageId) {
                               return Container(
                                 key: _messageKeys[index],
                                 child: ValueListenableBuilder<String>(
                                   valueListenable: _streamingContent,
                                   builder: (context, content, _) {
-                                    final streamingMsg = Message(
-                                      id: message.id,
-                                      role: MessageRole.assistant,
-                                      content: content,
-                                      timestamp: message.timestamp,
-                                      status: MessageStatus.sending,
-                                    );
+                                    final streamingMsg = Message(id: message.id, role: MessageRole.assistant, content: content, timestamp: message.timestamp, status: MessageStatus.sending);
                                     return MessageBubble(message: streamingMsg);
                                   },
                                 ),
@@ -750,46 +547,16 @@ class _SubChatScreenState extends State<SubChatScreen> {
                               key: _messageKeys[index],
                               child: MessageBubble(
                                 message: message,
-                                onRetry: message.status == MessageStatus.error
-                                    ? () => _sendMessage(message.content, message.attachments)
-                                    : null,
+                                onRetry: message.status == MessageStatus.error ? () => _sendMessage(message.content, message.attachments) : null,
                                 onDelete: () => _deleteMessage(index),
-                                onRegenerate: message.role == MessageRole.assistant && message.status == MessageStatus.sent
-                                    ? () => _regenerateMessage(index)
-                                    : null,
-                              ),
-                            );
-                          },
-                        ),
-
-                          itemCount: _subConversation.messages.length,
-                          itemBuilder: (context, index) {
-                            _messageKeys[index] ??= GlobalKey();
-                            final message = _subConversation.messages[index];
-                            return Container(
-                              key: _messageKeys[index],
-                              child: MessageBubble(
-                                message: message,
-                                onRetry: message.status == MessageStatus.error
-                                    ? () => _sendMessage(message.content, message.attachments)
-                                    : null,
-                                onDelete: () => _deleteMessage(index),
-                                onRegenerate: message.role == MessageRole.assistant && message.status == MessageStatus.sent
-                                    ? () => _regenerateMessage(index)
-                                    : null,
+                                onRegenerate: message.role == MessageRole.assistant && message.status == MessageStatus.sent ? () => _regenerateMessage(index) : null,
                               ),
                             );
                           },
                         ),
                       ),
               ),
-              ChatInput(
-                onSend: _sendMessage,
-                enabled: !_isLoading,
-                isGenerating: _isLoading,
-                onStop: _stopGeneration,
-              ),
-
+              ChatInput(onSend: _sendMessage, enabled: !_isLoading, isGenerating: _isLoading, onStop: _stopGeneration),
             ],
           ),
           if (_showScrollButtons && hasMessages)
@@ -797,16 +564,8 @@ class _SubChatScreenState extends State<SubChatScreen> {
               bottom: 80,
               left: 0,
               right: 0,
-              child: Center(
-                child: ScrollButtons(
-                  onScrollToTop: _scrollToTop,
-                  onScrollToBottom: _forceScrollToBottom,
-                  onPreviousMessage: _scrollToPreviousMessage,
-                  onNextMessage: _scrollToNextMessage,
-                ),
-              ),
+              child: Center(child: ScrollButtons(onScrollToTop: _scrollToTop, onScrollToBottom: _forceScrollToBottom, onPreviousMessage: _scrollToPreviousMessage, onNextMessage: _scrollToNextMessage)),
             ),
-
         ],
       ),
     );
