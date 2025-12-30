@@ -181,7 +181,61 @@ class _MainChatScreenState extends State<MainChatScreen> {
     setState(() {});
   }
 
-  Future<void> _regenerateMessage(int aiMessageIndex) async {
+  Future<void> _editMessage(int index) async {
+    if (_currentConversation == null) return;
+    final message = _currentConversation!.messages[index];
+    if (message.role != MessageRole.user) return;
+    
+    final controller = TextEditingController(text: message.content);
+    final result = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('编辑消息'),
+        content: TextField(
+          controller: controller,
+          maxLines: null,
+          minLines: 3,
+          decoration: const InputDecoration(
+            hintText: '输入消息内容...',
+            border: OutlineInputBorder(),
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, controller.text.trim()),
+            child: const Text('保存并重新发送'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    
+    if (result != null && result.isNotEmpty && result != message.content) {
+      // 删除该消息及之后的所有消息
+      while (_currentConversation!.messages.length > index) {
+        _currentConversation!.messages.removeLast();
+      }
+      _messageKeys.clear();
+      
+      // 添加编辑后的消息
+      final editedMessage = Message(
+        role: MessageRole.user,
+        content: result,
+        fullContent: message.fullContent != null ? result : null,
+        attachments: message.attachments,
+        embeddedFiles: message.embeddedFiles,
+        status: MessageStatus.sent,
+      );
+      _currentConversation!.messages.add(editedMessage);
+      await ConversationService.instance.update(_currentConversation!);
+      setState(() {});
+      _scrollToBottom();
+      await _sendMessageToAI();
+    }
+  }
+
+
     if (_currentConversation == null) return;
     _currentConversation!.messages.removeAt(aiMessageIndex);
     _messageKeys.remove(aiMessageIndex);
@@ -220,9 +274,12 @@ class _MainChatScreenState extends State<MainChatScreen> {
       return;
     }
 
-    String displayContent = '【发送文件】共 ${filesToSend.length} 个文件\n\n【文件目录】\n$_directoryTree';
+    // 显示内容只显示文件数量，不重复显示目录（目录在附件中）
+    String displayContent = '【发送文件】共 ${filesToSend.length} 个文件';
+    // 完整内容包含目录和文件
     String fullContent = '【发送文件】共 ${filesToSend.length} 个文件\n\n【文件目录】\n$_directoryTree\n\n【文件内容】\n';
     List<EmbeddedFile> embeddedFiles = [];
+    // 目录作为附件
     embeddedFiles.add(EmbeddedFile(path: '📁 文件目录.txt', content: _directoryTree, size: _directoryTree.length));
     for (var file in filesToSend) {
       final path = file['path'] as String;
@@ -237,6 +294,7 @@ class _MainChatScreenState extends State<MainChatScreen> {
       fullContent += '\n\n【已超过900K】';
     }
     final userMessage = Message(role: MessageRole.user, content: displayContent, fullContent: fullContent, embeddedFiles: embeddedFiles, status: MessageStatus.sent);
+
     _currentConversation!.messages.add(userMessage);
     await ConversationService.instance.update(_currentConversation!);
     setState(() {});
@@ -751,6 +809,7 @@ class _MainChatScreenState extends State<MainChatScreen> {
                                 onRetry: message.status == MessageStatus.error ? () => _sendMessage(message.content, message.attachments) : null,
                                 onDelete: () => _deleteMessage(index),
                                 onRegenerate: message.role == MessageRole.assistant && message.status == MessageStatus.sent ? () => _regenerateMessage(index) : null,
+                                onEdit: message.role == MessageRole.user && message.status == MessageStatus.sent ? () => _editMessage(index) : null,
                               ),
                             );
                           },
@@ -758,6 +817,7 @@ class _MainChatScreenState extends State<MainChatScreen> {
                       ),
               ),
               ChatInput(onSend: _sendMessage, enabled: !_isLoading, isGenerating: _isLoading, onStop: _stopGeneration),
+
             ],
           ),
           if (_showScrollButtons && hasMessages)
