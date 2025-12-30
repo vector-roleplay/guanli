@@ -496,7 +496,60 @@ class _SubChatScreenState extends State<SubChatScreen> {
     setState(() {});
   }
 
-  Future<void> _regenerateMessage(int aiMessageIndex) async {
+  Future<void> _editMessage(int index) async {
+    final message = _subConversation.messages[index];
+    if (message.role != MessageRole.user) return;
+    
+    final controller = TextEditingController(text: message.content);
+    final result = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('编辑消息'),
+        content: TextField(
+          controller: controller,
+          maxLines: null,
+          minLines: 3,
+          decoration: const InputDecoration(
+            hintText: '输入消息内容...',
+            border: OutlineInputBorder(),
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, controller.text.trim()),
+            child: const Text('保存并重新发送'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    
+    if (result != null && result.isNotEmpty && result != message.content) {
+      // 删除该消息及之后的所有消息
+      while (_subConversation.messages.length > index) {
+        _subConversation.messages.removeLast();
+      }
+      _messageKeys.clear();
+      
+      // 添加编辑后的消息
+      final editedMessage = Message(
+        role: MessageRole.user,
+        content: result,
+        fullContent: message.fullContent != null ? result : null,
+        attachments: message.attachments,
+        embeddedFiles: message.embeddedFiles,
+        status: MessageStatus.sent,
+      );
+      _subConversation.messages.add(editedMessage);
+      await SubConversationService.instance.update(_subConversation);
+      setState(() {});
+      _scrollToBottom();
+      await _requestAIResponse();
+    }
+  }
+
+
     _subConversation.messages.removeAt(aiMessageIndex);
     _messageKeys.remove(aiMessageIndex);
     await SubConversationService.instance.update(_subConversation);
@@ -575,6 +628,7 @@ class _SubChatScreenState extends State<SubChatScreen> {
                                 onRetry: message.status == MessageStatus.error ? () => _sendMessage(message.content, message.attachments) : null,
                                 onDelete: () => _deleteMessage(index),
                                 onRegenerate: message.role == MessageRole.assistant && message.status == MessageStatus.sent ? () => _regenerateMessage(index) : null,
+                                onEdit: message.role == MessageRole.user && message.status == MessageStatus.sent ? () => _editMessage(index) : null,
                               ),
                             );
                           },
@@ -582,6 +636,7 @@ class _SubChatScreenState extends State<SubChatScreen> {
                       ),
               ),
               ChatInput(onSend: _sendMessage, enabled: !_isLoading, isGenerating: _isLoading, onStop: _stopGeneration),
+
             ],
           ),
           if (_showScrollButtons && hasMessages)
