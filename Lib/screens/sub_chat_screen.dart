@@ -190,11 +190,12 @@ class _SubChatScreenState extends State<SubChatScreen> {
     String displayContent = '【申请${_subConversation.levelName}子界面】\n$message$warningText';
     String fullContent = '【申请${_subConversation.levelName}子界面】\n$message\n\n【文件目录】\n${widget.directoryTree}$warningText';
     
+    // 不再添加目录附件，只后台打包发送
     List<EmbeddedFile> embeddedFiles = [];
-    embeddedFiles.add(EmbeddedFile(path: '📁 文件目录.txt', content: widget.directoryTree, size: widget.directoryTree.length));
     
     if (fileContents.isEmpty) {
       fullContent += '\n\n【注意】未找到请求的文件';
+
       await _sendSystemMessage(displayContent: displayContent, fullContent: fullContent, embeddedFiles: embeddedFiles);
     } else if (!exceedsLimit) {
       fullContent += '\n\n【文件内容】\n';
@@ -349,9 +350,10 @@ class _SubChatScreenState extends State<SubChatScreen> {
       final lastMsg = _subConversation.messages.last;
       if (lastMsg.role == MessageRole.assistant && lastMsg.status == MessageStatus.sending) {
         final content = _streamingContent.value;
-        if (content.isNotEmpty) {
-          final msgIndex = _subConversation.messages.indexWhere((m) => m.id == lastMsg.id);
-          if (msgIndex != -1) {
+        final msgIndex = _subConversation.messages.indexWhere((m) => m.id == lastMsg.id);
+        if (msgIndex != -1) {
+          if (content.isNotEmpty) {
+            // 有内容，更新为已停止
             _subConversation.messages[msgIndex] = Message(
               id: lastMsg.id,
               role: MessageRole.assistant,
@@ -360,14 +362,20 @@ class _SubChatScreenState extends State<SubChatScreen> {
               status: MessageStatus.sent,
             );
             SubConversationService.instance.update(_subConversation);
+          } else {
+            // 没有内容，直接删除这条消息
+            _subConversation.messages.removeAt(msgIndex);
+            SubConversationService.instance.update(_subConversation);
           }
         }
       }
     }
+    setState(() {});
   }
 
 
   Future<void> _requestAIResponse() async {
+
     _stopRequested = false;
     final aiMessage = Message(role: MessageRole.assistant, content: '', status: MessageStatus.sending);
     _subConversation.messages.add(aiMessage);
