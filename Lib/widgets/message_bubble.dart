@@ -604,6 +604,12 @@ class _MessageBubbleState extends State<MessageBubble> with AutomaticKeepAliveCl
     );
   }
 
+  // 获取不含思维链的内容（用于复制）
+  String _getContentWithoutThinking(String content) {
+    final thinkingRegex = RegExp(r'<think(?:ing)?>([\s\S]*?)</think(?:ing)?>', caseSensitive: false);
+    return content.replaceAll(thinkingRegex, '').trim();
+  }
+
   Widget _buildFooter(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     final usage = widget.message.tokenUsage;
@@ -633,7 +639,11 @@ class _MessageBubbleState extends State<MessageBubble> with AutomaticKeepAliveCl
           _buildActionButton(
             icon: Icons.copy,
             onTap: () {
-              Clipboard.setData(ClipboardData(text: widget.message.content));
+              // AI消息复制时去除思维链
+              final contentToCopy = isAI 
+                  ? _getContentWithoutThinking(widget.message.content)
+                  : widget.message.content;
+              Clipboard.setData(ClipboardData(text: contentToCopy));
               ScaffoldMessenger.of(context).showSnackBar(
                 const SnackBar(content: Text('已复制'), duration: Duration(seconds: 1)),
               );
@@ -643,6 +653,7 @@ class _MessageBubbleState extends State<MessageBubble> with AutomaticKeepAliveCl
           // 用户消息：编辑按钮
           if (isUser && widget.onEdit != null)
             _buildActionButton(icon: Icons.edit, onTap: widget.onEdit!, colorScheme: colorScheme),
+
           // AI消息：重新生成按钮
           if (isAI && widget.onRegenerate != null)
             _buildActionButton(icon: Icons.refresh, onTap: widget.onRegenerate!, colorScheme: colorScheme),
