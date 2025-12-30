@@ -366,10 +366,32 @@ class _MessageBubbleState extends State<MessageBubble> with AutomaticKeepAliveCl
             const SizedBox(width: 8),
             GestureDetector(onTap: widget.onRetry, child: Text('重试', style: TextStyle(fontSize: 12, color: colorScheme.primary, fontWeight: FontWeight.bold))),
           ],
+          if (widget.onDelete != null) ...[
+            const SizedBox(width: 12),
+            GestureDetector(
+              onTap: widget.onDelete,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: colorScheme.error.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.delete_outline, size: 14, color: colorScheme.error),
+                    const SizedBox(width: 4),
+                    Text('删除', style: TextStyle(fontSize: 12, color: colorScheme.error, fontWeight: FontWeight.bold)),
+                  ],
+                ),
+              ),
+            ),
+          ],
         ],
       ),
     );
   }
+
 
   Widget _buildFooter(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
