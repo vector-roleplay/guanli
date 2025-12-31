@@ -56,14 +56,15 @@ class _MessageBubbleState extends State<MessageBubble> with AutomaticKeepAliveCl
         child: Column(
           crossAxisAlignment: isUser ? CrossAxisAlignment.end : CrossAxisAlignment.start,
           children: [
-            // 消息内容
-            if (isUser)
+            // 消息内容（用户消息为空时不显示气泡）
+            if (isUser && widget.message.content.isNotEmpty)
               _buildUserMessage(context)
-            else
+            else if (!isUser)
               _buildAIMessage(context),
             
             // 附件区域（放在气泡外面下方）
             if (widget.message.attachments.isNotEmpty || widget.message.embeddedFiles.isNotEmpty)
+
               Padding(
                 padding: EdgeInsets.only(top: 8, left: isUser ? 40 : 0, right: isUser ? 0 : 40),
                 child: _buildAttachmentsSection(context),
