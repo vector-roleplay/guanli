@@ -114,10 +114,9 @@ class _MessageBubbleState extends State<MessageBubble> with AutomaticKeepAliveCl
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        // 流式和静止消息都用完整渲染
         if (widget.message.content.isNotEmpty)
-          isSending 
-              ? _buildStreamingContent(context)
-              : _buildCachedContent(context),
+          _buildFullContent(context),
         if (isSending)
           Padding(
             padding: const EdgeInsets.only(top: 8),
@@ -135,6 +134,7 @@ class _MessageBubbleState extends State<MessageBubble> with AutomaticKeepAliveCl
       ],
     );
   }
+
 
   // 附件区域
   Widget _buildAttachmentsSection(BuildContext context) {
@@ -169,22 +169,18 @@ class _MessageBubbleState extends State<MessageBubble> with AutomaticKeepAliveCl
     );
   }
 
-  Widget _buildStreamingContent(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    
-    return SelectableText(
-      widget.message.content,
-      style: TextStyle(
-        color: colorScheme.onSurface,
-        fontSize: 15,
-        height: 1.6,
-      ),
-    );
-  }
-
-  Widget _buildCachedContent(BuildContext context) {
+  // 完整内容渲染（流式和静止都用这个）
+  Widget _buildFullContent(BuildContext context) {
     final content = widget.message.content;
+    final isSending = widget.message.status == MessageStatus.sending;
     
+    // 流式时不缓存（内容在变），静止时缓存
+    if (isSending) {
+      final blocks = _parseContent(content);
+      return SelectionArea(child: _buildParsedContent(context, blocks));
+    }
+    
+    // 静止消息使用缓存
     if (_cachedContent != content) {
       _cachedContent = content;
       _cachedBlocks = _parseContent(content);
@@ -193,26 +189,45 @@ class _MessageBubbleState extends State<MessageBubble> with AutomaticKeepAliveCl
     return SelectionArea(child: _buildParsedContent(context, _cachedBlocks!));
   }
 
+
   List<_ContentBlock> _parseContent(String content) {
     List<_ContentBlock> blocks = [];
+    final isSending = widget.message.status == MessageStatus.sending;
     
-    // 提取思维链
+    // 提取思维链（处理未闭合的情况）
     final thinkingRegex = RegExp(r'<think(?:ing)?>([\s\S]*?)</think(?:ing)?>', caseSensitive: false);
     final thinkMatch = thinkingRegex.firstMatch(content);
     
+    // 检测未闭合的思维链
+    final hasOpenThink = RegExp(r'<think(?:ing)?>(?![\s\S]*</think(?:ing)?>)', caseSensitive: false).hasMatch(content);
+    
     String mainContent = content;
     if (thinkMatch != null && widget.message.role != MessageRole.user) {
+      // 完整的思维链，正常处理
       blocks.add(_ContentBlock(type: _BlockType.thinking, content: thinkMatch.group(1) ?? ''));
       mainContent = content.replaceAll(thinkingRegex, '').trim();
+    } else if (hasOpenThink && widget.message.role != MessageRole.user) {
+      // 未闭合的思维链（流式中）
+      final openMatch = RegExp(r'<think(?:ing)?>([\s\S]*)', caseSensitive: false).firstMatch(content);
+      if (openMatch != null) {
+        // 流式时显示为正在思考的内容
+        blocks.add(_ContentBlock(type: _BlockType.thinking, content: openMatch.group(1) ?? ''));
+        mainContent = content.substring(0, openMatch.start).trim();
+      }
     }
     
     if (mainContent.isEmpty) return blocks;
     
-    // 提取代码块
+    // 提取代码块（处理未闭合的情况）
     final codeBlockRegex = RegExp(r'```(\w*)\n?([\s\S]*?)```');
     final matches = codeBlockRegex.allMatches(mainContent).toList();
     
-    if (matches.isEmpty) {
+    // 检测未闭合的代码块
+    final unclosedCodeMatch = RegExp(r'```(\w*)\n?([\s\S]*)$').firstMatch(mainContent);
+    final hasUnclosedCode = unclosedCodeMatch != null && 
+        !mainContent.substring(unclosedCodeMatch.start).contains(RegExp(r'```[\s\S]*```'));
+    
+    if (matches.isEmpty && !hasUnclosedCode) {
       blocks.add(_ContentBlock(type: _BlockType.markdown, content: mainContent));
       return blocks;
     }
@@ -236,12 +251,28 @@ class _MessageBubbleState extends State<MessageBubble> with AutomaticKeepAliveCl
     if (lastEnd < mainContent.length) {
       final textAfter = mainContent.substring(lastEnd).trim();
       if (textAfter.isNotEmpty) {
-        blocks.add(_ContentBlock(type: _BlockType.markdown, content: textAfter));
+        // 检查是否是未闭合的代码块
+        if (hasUnclosedCode && isSending) {
+          final unclosedMatch = RegExp(r'^```(\w*)\n?([\s\S]*)$').firstMatch(textAfter);
+          if (unclosedMatch != null) {
+            // 流式中的未闭合代码块，显示为代码
+            blocks.add(_ContentBlock(
+              type: _BlockType.code,
+              content: unclosedMatch.group(2) ?? '',
+              language: unclosedMatch.group(1),
+            ));
+          } else {
+            blocks.add(_ContentBlock(type: _BlockType.markdown, content: textAfter));
+          }
+        } else {
+          blocks.add(_ContentBlock(type: _BlockType.markdown, content: textAfter));
+        }
       }
     }
     
     return blocks;
   }
+
 
   Widget _buildParsedContent(BuildContext context, List<_ContentBlock> blocks) {
     return Column(
