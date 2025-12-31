@@ -127,9 +127,11 @@ class _SubChatScreenState extends State<SubChatScreen> {
     if (!_itemScrollController.isAttached) return;
     
     final maxIndex = _subConversation.messages.length - 1;
-    // 使用负 alignment 补偿顶部 padding，确保完全到顶
-    _itemScrollController.jumpTo(index: maxIndex, alignment: -0.05);
+    // reverse 列表中，alignment: 1.0 让 item 起始边对齐视口顶部
+    // 加一点额外偏移确保完全显示
+    _itemScrollController.jumpTo(index: maxIndex, alignment: 1.1);
   }
+
 
 
   void _scrollToPreviousMessage() {
