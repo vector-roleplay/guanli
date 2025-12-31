@@ -26,6 +26,8 @@ dependencies:
   uuid: any
   permission_handler: any
   device_info_plus: any
+  scrollable_positioned_list: any
+
 
 dev_dependencies:
   flutter_test:
