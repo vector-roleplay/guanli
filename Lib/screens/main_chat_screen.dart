@@ -114,10 +114,34 @@ class _MainChatScreenState extends State<MainChatScreen> {
   void _scrollToBottom() {
     if (_userScrolling || !_isNearBottom) return;
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_scrollController.hasClients) {
-        _scrollController.animateTo(_scrollController.position.maxScrollExtent, duration: const Duration(milliseconds: 300), curve: Curves.easeOut);
-      }
+      _performScrollToBottom(animate: true);
     });
+  }
+
+  void _performScrollToBottom({bool animate = true}) {
+    if (!_scrollController.hasClients) return;
+    
+    final maxExtent = _scrollController.position.maxScrollExtent;
+    
+    if (animate) {
+      _scrollController.animateTo(
+        maxExtent,
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.easeOut,
+      ).then((_) {
+        // 动画结束后再次校正，确保真正到达底部
+        Future.delayed(const Duration(milliseconds: 50), () {
+          if (_scrollController.hasClients) {
+            final newMaxExtent = _scrollController.position.maxScrollExtent;
+            if (_scrollController.offset < newMaxExtent - 5) {
+              _scrollController.jumpTo(newMaxExtent);
+            }
+          }
+        });
+      });
+    } else {
+      _scrollController.jumpTo(maxExtent);
+    }
   }
 
   void _scrollToTop() {
@@ -126,14 +150,31 @@ class _MainChatScreenState extends State<MainChatScreen> {
     }
   }
 
+
   void _forceScrollToBottom() {
-    if (_scrollController.hasClients) {
-      _scrollController.animateTo(_scrollController.position.maxScrollExtent, duration: const Duration(milliseconds: 300), curve: Curves.easeOut);
-      setState(() => _isNearBottom = true);
-    }
+    setState(() => _isNearBottom = true);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _performScrollToBottom(animate: true);
+    });
+  }
+
+  // 确保滚动到底部（用于流式结束后校正）
+  void _ensureScrollToBottom() {
+    Future.delayed(const Duration(milliseconds: 100), () {
+      if (_scrollController.hasClients && mounted) {
+        final maxExtent = _scrollController.position.maxScrollExtent;
+        final currentOffset = _scrollController.offset;
+        
+        // 如果超出范围或距离底部太远，校正位置
+        if (currentOffset > maxExtent || (maxExtent - currentOffset).abs() > 50) {
+          _scrollController.jumpTo(maxExtent.clamp(0, maxExtent));
+        }
+      }
+    });
   }
 
   void _scrollToPreviousMessage() {
+
     if (!_scrollController.hasClients || _currentConversation == null) return;
     final currentOffset = _scrollController.offset;
     double targetOffset = 0;
@@ -648,11 +689,12 @@ class _MainChatScreenState extends State<MainChatScreen> {
       }
       await ConversationService.instance.update(_currentConversation!);
       setState(() {});
-      _scrollToBottom();
+      _ensureScrollToBottom();  // 使用校正方法
       await _checkAndNavigateToSub(result.content);
     } catch (e) {
       // 如果是主动停止，不显示错误
       if (_stopRequested) {
+
         _streamingMessageId = null;
         setState(() {});
         return;
@@ -853,17 +895,23 @@ class _MainChatScreenState extends State<MainChatScreen> {
           ),
           if (_showScrollButtons && hasMessages)
             Positioned(
+              right: 12,
+              top: 0,
               bottom: 80,
-              left: 0,
-              right: 0,
               child: Center(
-                child: ScrollButtons(onScrollToTop: _scrollToTop, onScrollToBottom: _forceScrollToBottom, onPreviousMessage: _scrollToPreviousMessage, onNextMessage: _scrollToNextMessage),
+                child: ScrollButtons(
+                  onScrollToTop: _scrollToTop,
+                  onScrollToBottom: _forceScrollToBottom,
+                  onPreviousMessage: _scrollToPreviousMessage,
+                  onNextMessage: _scrollToNextMessage,
+                ),
               ),
             ),
         ],
       ),
     );
   }
+
 
   Widget _buildDrawer(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
@@ -957,6 +1005,9 @@ class _MainChatScreenState extends State<MainChatScreen> {
     );
   }
 }// 编辑消息对话框
+import 'package:file_picker/file_picker.dart';
+import 'package:image_picker/image_picker.dart';
+
 class _EditMessageDialog extends StatefulWidget {
   final String initialContent;
   final List<FileAttachment> attachments;
@@ -991,8 +1042,82 @@ class _EditMessageDialogState extends State<_EditMessageDialog> {
     super.dispose();
   }
 
+  Future<void> _pickFiles() async {
+    final result = await FilePicker.platform.pickFiles(
+      allowMultiple: true,
+      type: FileType.any,
+    );
+
+    if (result != null) {
+      for (var file in result.files) {
+        if (file.path != null) {
+          final fileInfo = File(file.path!);
+          final mimeType = _getMimeType(file.name);
+          
+          String? content;
+          if (_isTextFile(file.name, mimeType)) {
+            try {
+              content = await fileInfo.readAsString();
+            } catch (e) {}
+          }
+
+          setState(() {
+            _attachments.add(FileAttachment(
+              name: file.name,
+              path: file.path!,
+              mimeType: mimeType,
+              size: file.size,
+              content: content,
+            ));
+          });
+        }
+      }
+    }
+  }
+
+  Future<void> _pickImage() async {
+    final picker = ImagePicker();
+    final images = await picker.pickMultiImage();
+    
+    for (var image in images) {
+      final file = File(image.path);
+      final mimeType = _getMimeType(image.name);
+      
+      setState(() {
+        _attachments.add(FileAttachment(
+          name: image.name,
+          path: image.path,
+          mimeType: mimeType,
+          size: file.lengthSync(),
+        ));
+      });
+    }
+  }
+
+  String _getMimeType(String fileName) {
+    final ext = fileName.split('.').last.toLowerCase();
+    final mimeTypes = {
+      'jpg': 'image/jpeg', 'jpeg': 'image/jpeg', 'png': 'image/png',
+      'gif': 'image/gif', 'webp': 'image/webp', 'bmp': 'image/bmp',
+      'dart': 'text/x-dart', 'js': 'text/javascript', 'json': 'application/json',
+      'xml': 'application/xml', 'yaml': 'text/yaml', 'yml': 'text/yaml',
+      'md': 'text/markdown', 'txt': 'text/plain', 'html': 'text/html',
+      'css': 'text/css', 'py': 'text/x-python', 'java': 'text/x-java',
+    };
+    return mimeTypes[ext] ?? 'application/octet-stream';
+  }
+
+  bool _isTextFile(String fileName, String mimeType) {
+    if (mimeType.startsWith('text/') || mimeType.contains('json') || mimeType.contains('xml')) {
+      return true;
+    }
+    final textExtensions = ['.dart', '.js', '.ts', '.py', '.java', '.c', '.cpp', '.h', '.go', '.rs', '.rb', '.php', '.sh', '.sql', '.md', '.txt', '.yaml', '.yml', '.json', '.xml', '.html', '.css'];
+    return textExtensions.any((e) => fileName.toLowerCase().endsWith(e));
+  }
+
   @override
   Widget build(BuildContext context) {
+
     final colorScheme = Theme.of(context).colorScheme;
     
     return AlertDialog(
@@ -1058,6 +1183,34 @@ class _EditMessageDialogState extends State<_EditMessageDialog> {
                       .toList(),
                 ),
               ],
+              
+              // 添加附件按钮
+              const SizedBox(height: 20),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: _pickFiles,
+                      icon: const Icon(Icons.attach_file, size: 18),
+                      label: const Text('添加文件'),
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 10),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: _pickImage,
+                      icon: const Icon(Icons.image, size: 18),
+                      label: const Text('添加图片'),
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 10),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
             ],
           ),
         ),
@@ -1067,6 +1220,7 @@ class _EditMessageDialogState extends State<_EditMessageDialog> {
           onPressed: () => Navigator.pop(context),
           child: const Text('取消'),
         ),
+
         TextButton(
           onPressed: () {
             Navigator.pop(context, {
