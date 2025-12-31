@@ -124,27 +124,25 @@ class _MainChatScreenState extends State<MainChatScreen> {
   void _performScrollToBottom({bool animate = true}) {
     if (!_scrollController.hasClients) return;
     
-    final maxExtent = _scrollController.position.maxScrollExtent;
-    
-    if (animate) {
-      _scrollController.animateTo(
-        maxExtent,
-        duration: const Duration(milliseconds: 300),
-        curve: Curves.easeOut,
-      ).then((_) {
-        // 动画结束后再次校正，确保真正到达底部
-        Future.delayed(const Duration(milliseconds: 50), () {
-          if (_scrollController.hasClients) {
-            final newMaxExtent = _scrollController.position.maxScrollExtent;
-            if (_scrollController.offset < newMaxExtent - 5) {
-              _scrollController.jumpTo(newMaxExtent);
-            }
-          }
-        });
-      });
-    } else {
-      _scrollController.jumpTo(maxExtent);
-    }
+    // 等待一帧确保布局完成
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!_scrollController.hasClients) return;
+      
+      final maxExtent = _scrollController.position.maxScrollExtent;
+      // 使用 clamp 确保不会超过实际范围
+      final safeOffset = maxExtent.clamp(0.0, maxExtent);
+      
+      if (animate) {
+        _scrollController.animateTo(
+          safeOffset,
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeOut,
+        );
+      } else {
+        // 直接跳转，不使用动画，避免冲过头
+        _scrollController.jumpTo(safeOffset);
+      }
+    });
   }
 
   void _scrollToTop() {
@@ -154,27 +152,24 @@ class _MainChatScreenState extends State<MainChatScreen> {
   }
 
 
+
   void _forceScrollToBottom() {
     setState(() => _isNearBottom = true);
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _performScrollToBottom(animate: true);
-    });
+    // 直接跳转，不使用动画，避免冲过头
+    _performScrollToBottom(animate: false);
   }
+
 
   // 确保滚动到底部（用于流式结束后校正）
   void _ensureScrollToBottom() {
-    Future.delayed(const Duration(milliseconds: 100), () {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_scrollController.hasClients && mounted) {
         final maxExtent = _scrollController.position.maxScrollExtent;
-        final currentOffset = _scrollController.offset;
-        
-        // 如果超出范围或距离底部太远，校正位置
-        if (currentOffset > maxExtent || (maxExtent - currentOffset).abs() > 50) {
-          _scrollController.jumpTo(maxExtent.clamp(0, maxExtent));
-        }
+        _scrollController.jumpTo(maxExtent.clamp(0.0, maxExtent));
       }
     });
   }
+
 
   void _scrollToPreviousMessage() {
 
@@ -686,11 +681,21 @@ class _MainChatScreenState extends State<MainChatScreen> {
       final msgIndex = _currentConversation!.messages.indexWhere((m) => m.id == aiMessage.id);
       if (msgIndex != -1) {
         _currentConversation!.messages[msgIndex] = Message(
-          id: aiMessage.id, role: MessageRole.assistant, content: result.content, timestamp: aiMessage.timestamp, status: MessageStatus.sent,
-          tokenUsage: TokenUsage(promptTokens: result.estimatedPromptTokens, completionTokens: result.estimatedCompletionTokens, totalTokens: result.estimatedPromptTokens + result.estimatedCompletionTokens, duration: stopwatch.elapsedMilliseconds / 1000),
+          id: aiMessage.id,
+          role: MessageRole.assistant,
+          content: result.content,
+          timestamp: aiMessage.timestamp,
+          status: MessageStatus.sent,
+          tokenUsage: TokenUsage(
+            promptTokens: result.promptTokens,
+            completionTokens: result.completionTokens,
+            totalTokens: result.promptTokens + result.completionTokens,
+            duration: stopwatch.elapsedMilliseconds / 1000,
+          ),
         );
       }
       await ConversationService.instance.update(_currentConversation!);
+
       setState(() {});
       _ensureScrollToBottom();  // 使用校正方法
       await _checkAndNavigateToSub(result.content);
