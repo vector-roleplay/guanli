@@ -15,6 +15,9 @@ import '../widgets/scroll_buttons.dart';
 import '../utils/message_detector.dart';
 import '../config/app_config.dart';
 
+import 'package:file_picker/file_picker.dart';
+import 'package:image_picker/image_picker.dart';
+
 class SubChatScreen extends StatefulWidget {
   final SubConversation subConversation;
   final String initialMessage;
@@ -101,12 +104,44 @@ class _SubChatScreenState extends State<SubChatScreen> {
   void _scrollToBottom() {
     if (_userScrolling || !_isNearBottom) return;
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_scrollController.hasClients) {
-        _scrollController.animateTo(
-          _scrollController.position.maxScrollExtent,
-          duration: const Duration(milliseconds: 300),
-          curve: Curves.easeOut,
-        );
+      _performScrollToBottom(animate: true);
+    });
+  }
+
+  void _performScrollToBottom({bool animate = true}) {
+    if (!_scrollController.hasClients) return;
+    
+    final maxExtent = _scrollController.position.maxScrollExtent;
+    
+    if (animate) {
+      _scrollController.animateTo(
+        maxExtent,
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.easeOut,
+      ).then((_) {
+        Future.delayed(const Duration(milliseconds: 50), () {
+          if (_scrollController.hasClients) {
+            final newMaxExtent = _scrollController.position.maxScrollExtent;
+            if (_scrollController.offset < newMaxExtent - 5) {
+              _scrollController.jumpTo(newMaxExtent);
+            }
+          }
+        });
+      });
+    } else {
+      _scrollController.jumpTo(maxExtent);
+    }
+  }
+
+  void _ensureScrollToBottom() {
+    Future.delayed(const Duration(milliseconds: 100), () {
+      if (_scrollController.hasClients && mounted) {
+        final maxExtent = _scrollController.position.maxScrollExtent;
+        final currentOffset = _scrollController.offset;
+        
+        if (currentOffset > maxExtent || (maxExtent - currentOffset).abs() > 50) {
+          _scrollController.jumpTo(maxExtent.clamp(0, maxExtent));
+        }
       }
     });
   }
@@ -117,18 +152,16 @@ class _SubChatScreenState extends State<SubChatScreen> {
     }
   }
 
+
   void _forceScrollToBottom() {
-    if (_scrollController.hasClients) {
-      _scrollController.animateTo(
-        _scrollController.position.maxScrollExtent,
-        duration: const Duration(milliseconds: 300),
-        curve: Curves.easeOut,
-      );
-      setState(() => _isNearBottom = true);
-    }
+    setState(() => _isNearBottom = true);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _performScrollToBottom(animate: true);
+    });
   }
 
   void _scrollToPreviousMessage() {
+
     if (!_scrollController.hasClients) return;
     final currentOffset = _scrollController.offset;
     double targetOffset = 0;
@@ -426,12 +459,13 @@ class _SubChatScreenState extends State<SubChatScreen> {
 
       await SubConversationService.instance.update(_subConversation);
       setState(() {});
-      _scrollToBottom();
+      _ensureScrollToBottom();  // 使用校正方法
       await _handleAIResponse(result.content);
 
     } catch (e) {
       // 如果是主动停止，不显示错误
       if (_stopRequested) {
+
         _streamingMessageId = null;
         setState(() {});
         return;
@@ -669,16 +703,26 @@ class _SubChatScreenState extends State<SubChatScreen> {
           ),
           if (_showScrollButtons && hasMessages)
             Positioned(
+              right: 12,
+              top: 0,
               bottom: 80,
-              left: 0,
-              right: 0,
-              child: Center(child: ScrollButtons(onScrollToTop: _scrollToTop, onScrollToBottom: _forceScrollToBottom, onPreviousMessage: _scrollToPreviousMessage, onNextMessage: _scrollToNextMessage)),
+              child: Center(
+                child: ScrollButtons(
+                  onScrollToTop: _scrollToTop,
+                  onScrollToBottom: _forceScrollToBottom,
+                  onPreviousMessage: _scrollToPreviousMessage,
+                  onNextMessage: _scrollToNextMessage,
+                ),
+              ),
             ),
         ],
       ),
     );
   }
-}// 子界面编辑消息对话框
+}
+
+// 子界面编辑消息对话框
+
 class _SubEditMessageDialog extends StatefulWidget {
   final String initialContent;
   final List<FileAttachment> attachments;
@@ -713,11 +757,85 @@ class _SubEditMessageDialogState extends State<_SubEditMessageDialog> {
     super.dispose();
   }
 
+  Future<void> _pickFiles() async {
+    final result = await FilePicker.platform.pickFiles(
+      allowMultiple: true,
+      type: FileType.any,
+    );
+
+    if (result != null) {
+      for (var file in result.files) {
+        if (file.path != null) {
+          final fileInfo = File(file.path!);
+          final mimeType = _getMimeType(file.name);
+          
+          String? content;
+          if (_isTextFile(file.name, mimeType)) {
+            try {
+              content = await fileInfo.readAsString();
+            } catch (e) {}
+          }
+
+          setState(() {
+            _attachments.add(FileAttachment(
+              name: file.name,
+              path: file.path!,
+              mimeType: mimeType,
+              size: file.size,
+              content: content,
+            ));
+          });
+        }
+      }
+    }
+  }
+
+  Future<void> _pickImage() async {
+    final picker = ImagePicker();
+    final images = await picker.pickMultiImage();
+    
+    for (var image in images) {
+      final file = File(image.path);
+      final mimeType = _getMimeType(image.name);
+      
+      setState(() {
+        _attachments.add(FileAttachment(
+          name: image.name,
+          path: image.path,
+          mimeType: mimeType,
+          size: file.lengthSync(),
+        ));
+      });
+    }
+  }
+
+  String _getMimeType(String fileName) {
+    final ext = fileName.split('.').last.toLowerCase();
+    final mimeTypes = {
+      'jpg': 'image/jpeg', 'jpeg': 'image/jpeg', 'png': 'image/png',
+      'gif': 'image/gif', 'webp': 'image/webp', 'bmp': 'image/bmp',
+      'dart': 'text/x-dart', 'js': 'text/javascript', 'json': 'application/json',
+      'xml': 'application/xml', 'yaml': 'text/yaml', 'yml': 'text/yaml',
+      'md': 'text/markdown', 'txt': 'text/plain', 'html': 'text/html',
+      'css': 'text/css', 'py': 'text/x-python', 'java': 'text/x-java',
+    };
+    return mimeTypes[ext] ?? 'application/octet-stream';
+  }
+
+  bool _isTextFile(String fileName, String mimeType) {
+    if (mimeType.startsWith('text/') || mimeType.contains('json') || mimeType.contains('xml')) {
+      return true;
+    }
+    final textExtensions = ['.dart', '.js', '.ts', '.py', '.java', '.c', '.cpp', '.h', '.go', '.rs', '.rb', '.php', '.sh', '.sql', '.md', '.txt', '.yaml', '.yml', '.json', '.xml', '.html', '.css'];
+    return textExtensions.any((e) => fileName.toLowerCase().endsWith(e));
+  }
+
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     
     return AlertDialog(
+
       title: const Text('编辑消息'),
       content: SizedBox(
         width: double.maxFinite,
@@ -776,6 +894,34 @@ class _SubEditMessageDialogState extends State<_SubEditMessageDialog> {
                       .toList(),
                 ),
               ],
+              
+              // 添加附件按钮
+              const SizedBox(height: 20),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: _pickFiles,
+                      icon: const Icon(Icons.attach_file, size: 18),
+                      label: const Text('添加文件'),
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 10),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: _pickImage,
+                      icon: const Icon(Icons.image, size: 18),
+                      label: const Text('添加图片'),
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 10),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
             ],
           ),
         ),
@@ -796,6 +942,7 @@ class _SubEditMessageDialogState extends State<_SubEditMessageDialog> {
           },
           child: const Text('仅保存'),
         ),
+
         FilledButton(
           onPressed: () {
             Navigator.pop(context, {
