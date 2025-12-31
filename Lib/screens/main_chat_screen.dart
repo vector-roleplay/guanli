@@ -384,8 +384,10 @@ class _MainChatScreenState extends State<MainChatScreen> {
       context: context,
       isScrollControlled: true,
       builder: (ctx) => StatefulBuilder(
-        
+        builder: (ctx, setModalState) {
+          // 检查目录是否全选
           bool isDirFullySelected(String dir) {
+
             final files = groupedFiles[dir] ?? [];
             if (files.isEmpty) return false;
             return files.every((f) => selectedPaths.contains(f['path']));
