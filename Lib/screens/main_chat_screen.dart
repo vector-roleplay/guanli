@@ -116,10 +116,9 @@ class _MainChatScreenState extends State<MainChatScreen> {
 
   void _scrollToBottom() {
     if (_userScrolling || !_isNearBottom) return;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _performScrollToBottom(animate: true);
-    });
+    _performScrollToBottom(animate: true);
   }
+
 
   void _performScrollToBottom({bool animate = true}) {
     if (!_scrollController.hasClients) return;
