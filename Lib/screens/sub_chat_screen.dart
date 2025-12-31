@@ -174,27 +174,6 @@ class _SubChatScreenState extends State<SubChatScreen> {
   }
 
 
-  void _scrollToNextMessage() {
-    if (!_scrollController.hasClients) return;
-    final currentOffset = _scrollController.offset;
-    double targetOffset = _scrollController.position.maxScrollExtent;
-    for (int i = 0; i < _subConversation.messages.length; i++) {
-      final key = _messageKeys[i];
-      if (key?.currentContext != null) {
-        final box = key!.currentContext!.findRenderObject() as RenderBox?;
-        if (box != null) {
-          final position = box.localToGlobal(Offset.zero);
-          final scrollPosition = _scrollController.offset + position.dy - 100;
-          if (scrollPosition > currentOffset + 10) {
-            targetOffset = scrollPosition.clamp(0.0, _scrollController.position.maxScrollExtent);
-            break;
-          }
-        }
-      }
-    }
-    _scrollController.animateTo(targetOffset, duration: const Duration(milliseconds: 300), curve: Curves.easeOut);
-  }
-
   Future<void> _initializeChat() async {
     await _sendFilesWithMessage(widget.initialMessage, widget.requestedPaths);
   }
@@ -675,37 +654,6 @@ class _SubChatScreenState extends State<SubChatScreen> {
                           },
                         ),
 
-                          itemCount: _subConversation.messages.length,
-                          itemBuilder: (context, index) {
-                            _messageKeys[index] ??= GlobalKey();
-                            final message = _subConversation.messages[index];
-                            
-                            if (message.id == _streamingMessageId) {
-                              return Container(
-                                key: _messageKeys[index],
-                                child: ValueListenableBuilder<String>(
-                                  valueListenable: _streamingContent,
-                                  builder: (context, content, _) {
-                                    final streamingMsg = Message(id: message.id, role: MessageRole.assistant, content: content, timestamp: message.timestamp, status: MessageStatus.sending);
-                                    return MessageBubble(message: streamingMsg);
-                                  },
-                                ),
-                              );
-                            }
-                            
-                            return Container(
-                              key: _messageKeys[index],
-                              child: MessageBubble(
-                                message: message,
-                                onRetry: message.status == MessageStatus.error ? () => _sendMessage(message.content, message.attachments) : null,
-                                onDelete: () => _deleteMessage(index),
-                                onRegenerate: message.role == MessageRole.assistant && message.status == MessageStatus.sent ? () => _regenerateMessage(index) : null,
-                                onEdit: message.role == MessageRole.user && message.status == MessageStatus.sent ? () => _editMessage(index) : null,
-                              ),
-                            );
-                          },
-                        ),
-                      ),
               ),
               ChatInput(onSend: _sendMessage, enabled: !_isLoading, isGenerating: _isLoading, onStop: _stopGeneration),
 
