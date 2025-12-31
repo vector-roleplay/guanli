@@ -636,24 +636,26 @@ class _MessageBubbleState extends State<MessageBubble> with AutomaticKeepAliveCl
         ),
         if (isSent) ...[
           const SizedBox(width: 12),
-          // 复制按钮
-          _buildActionButton(
-            icon: Icons.copy,
-            onTap: () {
-              // AI消息复制时去除思维链
-              final contentToCopy = isAI 
-                  ? _getContentWithoutThinking(widget.message.content)
-                  : widget.message.content;
-              Clipboard.setData(ClipboardData(text: contentToCopy));
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('已复制'), duration: Duration(seconds: 1)),
-              );
-            },
-            colorScheme: colorScheme,
-          ),
+          // 复制按钮（内容为空时不显示）
+          if (widget.message.content.isNotEmpty)
+            _buildActionButton(
+              icon: Icons.copy,
+              onTap: () {
+                // AI消息复制时去除思维链
+                final contentToCopy = isAI 
+                    ? _getContentWithoutThinking(widget.message.content)
+                    : widget.message.content;
+                Clipboard.setData(ClipboardData(text: contentToCopy));
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('已复制'), duration: Duration(seconds: 1)),
+                );
+              },
+              colorScheme: colorScheme,
+            ),
           // 用户消息：编辑按钮
           if (isUser && widget.onEdit != null)
             _buildActionButton(icon: Icons.edit, onTap: widget.onEdit!, colorScheme: colorScheme),
+
 
           // AI消息：重新生成按钮
           if (isAI && widget.onRegenerate != null)
