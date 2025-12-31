@@ -384,13 +384,7 @@ class _MainChatScreenState extends State<MainChatScreen> {
       context: context,
       isScrollControlled: true,
       builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setModalState) {
-          // 计算每个目录的文件数
-          int getTotalFilesInDir(String dir) {
-            return groupedFiles[dir]?.length ?? 0;
-          }
-
-          // 检查目录是否全选
+        
           bool isDirFullySelected(String dir) {
             final files = groupedFiles[dir] ?? [];
             if (files.isEmpty) return false;
