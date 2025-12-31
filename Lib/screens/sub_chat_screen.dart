@@ -3,6 +3,7 @@
 import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
 import '../models/message.dart';
 
 import '../models/sub_conversation.dart';
@@ -17,6 +18,7 @@ import '../config/app_config.dart';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:image_picker/image_picker.dart';
+
 
 class SubChatScreen extends StatefulWidget {
   final SubConversation subConversation;
@@ -39,32 +41,33 @@ class SubChatScreen extends StatefulWidget {
 }
 
 class _SubChatScreenState extends State<SubChatScreen> {
-  final ScrollController _scrollController = ScrollController();
   final MessageDetector _detector = MessageDetector();
+  
+  // scrollable_positioned_list 控制器
+  final ItemScrollController _itemScrollController = ItemScrollController();
+  final ItemPositionsListener _itemPositionsListener = ItemPositionsListener.create();
   
   late SubConversation _subConversation;
   bool _isLoading = false;
   bool _stopRequested = false;
   
-  bool _userScrolling = false;
   bool _showScrollButtons = false;
   bool _isNearBottom = true;
   Timer? _hideButtonsTimer;
-  
-  final Map<int, GlobalKey> _messageKeys = {};
   
   // 流式消息专用
   final ValueNotifier<String> _streamingContent = ValueNotifier('');
   String? _streamingMessageId;
   
   DateTime _lastUIUpdate = DateTime.now();
-  static const Duration _uiUpdateInterval = Duration(milliseconds: 150);
+  static const Duration _uiUpdateInterval = Duration(milliseconds: 200);
+
 
   @override
   void initState() {
     super.initState();
     _subConversation = widget.subConversation;
-    _scrollController.addListener(_onScroll);
+    _itemPositionsListener.itemPositions.addListener(_onPositionsChange);
     
     if (!widget.isResuming && widget.requestedPaths.isNotEmpty) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -73,15 +76,15 @@ class _SubChatScreenState extends State<SubChatScreen> {
     }
   }
 
-  void _onScroll() {
-    if (!_scrollController.hasClients) return;
+  void _onPositionsChange() {
+    final positions = _itemPositionsListener.itemPositions.value;
+    if (positions.isEmpty) return;
     
-    final maxScroll = _scrollController.position.maxScrollExtent;
-    final currentScroll = _scrollController.offset;
-    final nearBottom = (maxScroll - currentScroll) < 50;
+    final lastIndex = _subConversation.messages.length - 1;
+    final isLastVisible = positions.any((pos) => pos.index == lastIndex);
     
-    if (nearBottom != _isNearBottom) {
-      setState(() => _isNearBottom = nearBottom);
+    if (isLastVisible != _isNearBottom) {
+      setState(() => _isNearBottom = isLastVisible);
     }
     
     setState(() => _showScrollButtons = true);
@@ -95,81 +98,81 @@ class _SubChatScreenState extends State<SubChatScreen> {
   @override
   void dispose() {
     _hideButtonsTimer?.cancel();
-    _scrollController.removeListener(_onScroll);
-    _scrollController.dispose();
+    _itemPositionsListener.itemPositions.removeListener(_onPositionsChange);
     _streamingContent.dispose();
     super.dispose();
   }
 
+
   void _scrollToBottom() {
-    if (_userScrolling || !_isNearBottom) return;
-    _performScrollToBottom(animate: true);
+    if (!_isNearBottom) return;
+    _performScrollToBottom();
   }
 
-
-  void _performScrollToBottom({bool animate = true}) {
-    if (!_scrollController.hasClients) return;
+  void _performScrollToBottom() {
+    if (_subConversation.messages.isEmpty) return;
+    if (!_itemScrollController.isAttached) return;
     
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!_scrollController.hasClients) return;
-      
-      final maxExtent = _scrollController.position.maxScrollExtent;
-      final safeOffset = maxExtent.clamp(0.0, maxExtent);
-      
-      if (animate) {
-        _scrollController.animateTo(
-          safeOffset,
-          duration: const Duration(milliseconds: 200),
-          curve: Curves.easeOut,
-        );
-      } else {
-        _scrollController.jumpTo(safeOffset);
-      }
-    });
+    final lastIndex = _subConversation.messages.length - 1;
+    _itemScrollController.jumpTo(index: lastIndex, alignment: 0.0);
   }
 
   void _ensureScrollToBottom() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_scrollController.hasClients && mounted) {
-        final maxExtent = _scrollController.position.maxScrollExtent;
-        _scrollController.jumpTo(maxExtent.clamp(0.0, maxExtent));
-      }
+      if (mounted) _forceScrollToBottom();
     });
   }
 
   void _scrollToTop() {
-    if (_scrollController.hasClients) {
-      _scrollController.animateTo(0, duration: const Duration(milliseconds: 300), curve: Curves.easeOut);
-    }
+    if (!_itemScrollController.isAttached) return;
+    _itemScrollController.jumpTo(index: 0, alignment: 0.0);
   }
 
   void _forceScrollToBottom() {
+    if (_subConversation.messages.isEmpty) return;
+    if (!_itemScrollController.isAttached) return;
+    
     setState(() => _isNearBottom = true);
-    _performScrollToBottom(animate: false);
+    final lastIndex = _subConversation.messages.length - 1;
+    _itemScrollController.jumpTo(index: lastIndex, alignment: 0.0);
   }
-
 
   void _scrollToPreviousMessage() {
-
-    if (!_scrollController.hasClients) return;
-    final currentOffset = _scrollController.offset;
-    double targetOffset = 0;
-    for (int i = _subConversation.messages.length - 1; i >= 0; i--) {
-      final key = _messageKeys[i];
-      if (key?.currentContext != null) {
-        final box = key!.currentContext!.findRenderObject() as RenderBox?;
-        if (box != null) {
-          final position = box.localToGlobal(Offset.zero);
-          final scrollPosition = _scrollController.offset + position.dy - 100;
-          if (scrollPosition < currentOffset - 10) {
-            targetOffset = scrollPosition.clamp(0.0, _scrollController.position.maxScrollExtent);
-            break;
-          }
-        }
-      }
-    }
-    _scrollController.animateTo(targetOffset, duration: const Duration(milliseconds: 300), curve: Curves.easeOut);
+    if (_subConversation.messages.isEmpty) return;
+    if (!_itemScrollController.isAttached) return;
+    
+    final positions = _itemPositionsListener.itemPositions.value;
+    if (positions.isEmpty) return;
+    
+    final firstVisible = positions.reduce((a, b) => a.index < b.index ? a : b);
+    final targetIndex = (firstVisible.index - 1).clamp(0, _subConversation.messages.length - 1);
+    
+    _itemScrollController.scrollTo(
+      index: targetIndex,
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeOut,
+      alignment: 0.0,
+    );
   }
+
+  void _scrollToNextMessage() {
+    if (_subConversation.messages.isEmpty) return;
+    if (!_itemScrollController.isAttached) return;
+    
+    final positions = _itemPositionsListener.itemPositions.value;
+    if (positions.isEmpty) return;
+    
+    final lastVisible = positions.reduce((a, b) => a.index > b.index ? a : b);
+    final targetIndex = (lastVisible.index + 1).clamp(0, _subConversation.messages.length - 1);
+    
+    _itemScrollController.scrollTo(
+      index: targetIndex,
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeOut,
+      alignment: 0.0,
+    );
+  }
+
 
   void _scrollToNextMessage() {
     if (!_scrollController.hasClients) return;
@@ -532,10 +535,10 @@ class _SubChatScreenState extends State<SubChatScreen> {
 
   Future<void> _deleteMessage(int index) async {
     _subConversation.messages.removeAt(index);
-    _messageKeys.remove(index);
     await SubConversationService.instance.update(_subConversation);
     setState(() {});
   }
+
 
   Future<void> _editMessage(int index) async {
     final message = _subConversation.messages[index];
@@ -561,7 +564,7 @@ class _SubChatScreenState extends State<SubChatScreen> {
         while (_subConversation.messages.length > index) {
           _subConversation.messages.removeLast();
         }
-        _messageKeys.clear();
+
         
         // 添加编辑后的消息
         final editedMessage = Message(
@@ -601,11 +604,11 @@ class _SubChatScreenState extends State<SubChatScreen> {
 
   Future<void> _regenerateMessage(int aiMessageIndex) async {
     _subConversation.messages.removeAt(aiMessageIndex);
-    _messageKeys.remove(aiMessageIndex);
     await SubConversationService.instance.update(_subConversation);
     setState(() {});
     await _requestAIResponse();
   }
+
 
   @override
   Widget build(BuildContext context) {
@@ -638,22 +641,40 @@ class _SubChatScreenState extends State<SubChatScreen> {
                             ? Column(mainAxisAlignment: MainAxisAlignment.center, children: [Icon(Icons.history, size: 48, color: colorScheme.outline), const SizedBox(height: 16), Text('会话已恢复', style: TextStyle(color: colorScheme.outline))])
                             : const CircularProgressIndicator(),
                       )
-                    : NotificationListener<ScrollNotification>(
-                        onNotification: (notification) {
-                          if (notification is ScrollStartNotification) _userScrolling = true;
-                          else if (notification is ScrollEndNotification) {
-                            _userScrolling = false;
-                            if (_scrollController.hasClients) {
-                              final maxScroll = _scrollController.position.maxScrollExtent;
-                              final currentScroll = _scrollController.offset;
-                              if ((maxScroll - currentScroll) < 50) setState(() => _isNearBottom = true);
-                            }
-                          }
-                          return false;
-                        },
-                        child: ListView.builder(
-                          controller: _scrollController,
+                    : ScrollablePositionedList.builder(
+                          itemScrollController: _itemScrollController,
+                          itemPositionsListener: _itemPositionsListener,
                           padding: const EdgeInsets.symmetric(vertical: 16),
+                          itemCount: _subConversation.messages.length,
+                          itemBuilder: (context, index) {
+                            final message = _subConversation.messages[index];
+                            
+                            if (message.id == _streamingMessageId) {
+                              return ValueListenableBuilder<String>(
+                                valueListenable: _streamingContent,
+                                builder: (context, content, _) {
+                                  final streamingMsg = Message(
+                                    id: message.id,
+                                    role: MessageRole.assistant,
+                                    content: content,
+                                    timestamp: message.timestamp,
+                                    status: MessageStatus.sending,
+                                  );
+                                  return MessageBubble(message: streamingMsg);
+                                },
+                              );
+                            }
+                            
+                            return MessageBubble(
+                              message: message,
+                              onRetry: message.status == MessageStatus.error ? () => _sendMessage(message.content, message.attachments) : null,
+                              onDelete: () => _deleteMessage(index),
+                              onRegenerate: message.role == MessageRole.assistant && message.status == MessageStatus.sent ? () => _regenerateMessage(index) : null,
+                              onEdit: message.role == MessageRole.user && message.status == MessageStatus.sent ? () => _editMessage(index) : null,
+                            );
+                          },
+                        ),
+
                           itemCount: _subConversation.messages.length,
                           itemBuilder: (context, index) {
                             _messageKeys[index] ??= GlobalKey();
