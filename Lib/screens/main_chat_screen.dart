@@ -19,8 +19,11 @@ import '../utils/message_detector.dart';
 import 'settings_screen.dart';
 import 'database_screen.dart';
 import 'sub_chat_screen.dart';
+import 'package:file_picker/file_picker.dart';
+import 'package:image_picker/image_picker.dart';
 
 class MainChatScreen extends StatefulWidget {
+
   const MainChatScreen({super.key});
 
   @override
@@ -1004,14 +1007,14 @@ class _MainChatScreenState extends State<MainChatScreen> {
       ),
     );
   }
-}// 编辑消息对话框
-import 'package:file_picker/file_picker.dart';
-import 'package:image_picker/image_picker.dart';
+}
 
+// 编辑消息对话框
 class _EditMessageDialog extends StatefulWidget {
   final String initialContent;
   final List<FileAttachment> attachments;
   final List<EmbeddedFile> embeddedFiles;
+
 
   const _EditMessageDialog({
     required this.initialContent,
