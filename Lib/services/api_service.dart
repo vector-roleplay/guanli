@@ -23,15 +23,18 @@ class ApiResponse {
 // 流式响应结果
 class StreamResult {
   final String content;
-  final int estimatedPromptTokens;
-  final int estimatedCompletionTokens;
+  final int promptTokens;
+  final int completionTokens;
+  final bool isRealUsage;  // 是否是API返回的真实数据
 
   StreamResult({
     required this.content,
-    required this.estimatedPromptTokens,
-    required this.estimatedCompletionTokens,
+    required this.promptTokens,
+    required this.completionTokens,
+    this.isRealUsage = false,
   });
 }
+
 
 class ApiService {
   // 用于取消请求的 client
@@ -131,7 +134,6 @@ class ApiService {
 
     List<Map<String, dynamic>> apiMessages = [];
     int totalInputLength = 0;
-    bool hasImages = false;
 
     // 系统消息
     if (systemPrompt.isNotEmpty || directoryTree.isNotEmpty) {
@@ -151,15 +153,10 @@ class ApiService {
 
     // 对话消息（异步处理附件）
     for (var msg in messages) {
-      // 检查是否有图片
-      if (msg.attachments.any((a) => a.isImage)) {
-        hasImages = true;
-      }
-      
       final apiFormat = await msg.toApiFormatAsync();
       apiMessages.add(apiFormat);
       
-      // 估算长度
+      // 估算长度（用于降级）
       if (apiFormat['content'] is String) {
         totalInputLength += (apiFormat['content'] as String).length;
       } else if (apiFormat['content'] is List) {
@@ -173,8 +170,8 @@ class ApiService {
       }
     }
 
-    // 估算输入token
-    final estimatedPromptTokens = (totalInputLength / 3).ceil();
+    // 估算值（用于降级）
+    final fallbackPromptTokens = (totalInputLength / 3).ceil();
 
     // 创建可取消的 client
     _activeClient = http.Client();
@@ -188,6 +185,7 @@ class ApiService {
         'messages': apiMessages,
         'max_tokens': 8192,
         'stream': true,
+        'stream_options': {'include_usage': true},  // 请求返回真实 token 数据
       });
 
       final response = await _activeClient!.send(request);
@@ -198,12 +196,11 @@ class ApiService {
       }
 
       StringBuffer fullContent = StringBuffer();
+      int? realPromptTokens;
+      int? realCompletionTokens;
 
       await for (var chunk in response.stream.transform(utf8.decoder)) {
-        // 检查是否已取消
-        if (_isCancelled) {
-          break;
-        }
+        if (_isCancelled) break;
         
         final lines = chunk.split('\n');
         for (var line in lines) {
@@ -211,13 +208,23 @@ class ApiService {
           
           if (line.startsWith('data: ')) {
             final data = line.substring(6).trim();
-            if (data == '[DONE]') {
-              break;
-            }
-            if (data.isNotEmpty) {
-              try {
-                final json = jsonDecode(data);
-                final delta = json['choices']?[0]?['delta'];
+            if (data == '[DONE]') break;
+            if (data.isEmpty) continue;
+            
+            try {
+              final json = jsonDecode(data);
+              
+              // 解析 usage（通常在最后一个 chunk 中）
+              final usage = json['usage'];
+              if (usage != null) {
+                realPromptTokens = usage['prompt_tokens'] as int?;
+                realCompletionTokens = usage['completion_tokens'] as int?;
+              }
+              
+              // 解析内容
+              final choices = json['choices'] as List?;
+              if (choices != null && choices.isNotEmpty) {
+                final delta = choices[0]['delta'];
                 if (delta != null) {
                   final content = delta['content'];
                   if (content != null && content.isNotEmpty) {
@@ -225,27 +232,31 @@ class ApiService {
                     onChunk(content);
                   }
                 }
-              } catch (e) {
-                // 解析错误，跳过
               }
+            } catch (e) {
+              // 解析错误，跳过
             }
           }
         }
       }
 
       final outputContent = fullContent.toString();
-      final estimatedCompletionTokens = estimateTokens(outputContent);
-
+      
+      // 优先使用真实数据，否则降级使用估算值
+      final hasRealUsage = realPromptTokens != null && realCompletionTokens != null;
+      
       return StreamResult(
         content: outputContent,
-        estimatedPromptTokens: estimatedPromptTokens,
-        estimatedCompletionTokens: estimatedCompletionTokens,
+        promptTokens: realPromptTokens ?? fallbackPromptTokens,
+        completionTokens: realCompletionTokens ?? estimateTokens(outputContent),
+        isRealUsage: hasRealUsage,
       );
     } finally {
       _activeClient?.close();
       _activeClient = null;
     }
   }
+
 
   // 保留原来的流式方法（兼容）
   static Stream<String> streamToMainAI({
