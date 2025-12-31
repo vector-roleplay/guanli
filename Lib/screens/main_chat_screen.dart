@@ -3,6 +3,7 @@
 import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
 import '../models/message.dart';
 
 import '../models/conversation.dart';
@@ -22,6 +23,7 @@ import 'sub_chat_screen.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:image_picker/image_picker.dart';
 
+
 class MainChatScreen extends StatefulWidget {
 
   const MainChatScreen({super.key});
@@ -31,47 +33,55 @@ class MainChatScreen extends StatefulWidget {
 }
 
 class _MainChatScreenState extends State<MainChatScreen> {
-  final ScrollController _scrollController = ScrollController();
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
   final MessageDetector _detector = MessageDetector();
+  
+  // scrollable_positioned_list 控制器
+  final ItemScrollController _itemScrollController = ItemScrollController();
+  final ItemPositionsListener _itemPositionsListener = ItemPositionsListener.create();
   
   String _directoryTree = '';
   Conversation? _currentConversation;
   bool _isLoading = false;
   bool _stopRequested = false;
   
-  bool _userScrolling = false;
   bool _showScrollButtons = false;
   bool _isNearBottom = true;
   Timer? _hideButtonsTimer;
-  final Map<int, GlobalKey> _messageKeys = {};
   
   // 流式消息专用 - 避免整个列表重建
   final ValueNotifier<String> _streamingContent = ValueNotifier('');
   String? _streamingMessageId;
   
   DateTime _lastUIUpdate = DateTime.now();
-  static const Duration _uiUpdateInterval = Duration(milliseconds: 150);
+  static const Duration _uiUpdateInterval = Duration(milliseconds: 200);
+
 
   @override
   void initState() {
     super.initState();
     _init();
-    _scrollController.addListener(_onScroll);
+    _itemPositionsListener.itemPositions.addListener(_onPositionsChange);
   }
 
-  void _onScroll() {
-    if (!_scrollController.hasClients) return;
-    final maxScroll = _scrollController.position.maxScrollExtent;
-    final currentScroll = _scrollController.offset;
-    final nearBottom = (maxScroll - currentScroll) < 50;
-    if (nearBottom != _isNearBottom) setState(() => _isNearBottom = nearBottom);
+  void _onPositionsChange() {
+    final positions = _itemPositionsListener.itemPositions.value;
+    if (positions.isEmpty || _currentConversation == null) return;
+    
+    final lastIndex = _currentConversation!.messages.length - 1;
+    final isLastVisible = positions.any((pos) => pos.index == lastIndex);
+    
+    if (isLastVisible != _isNearBottom) {
+      setState(() => _isNearBottom = isLastVisible);
+    }
+    
     setState(() => _showScrollButtons = true);
     _hideButtonsTimer?.cancel();
     _hideButtonsTimer = Timer(const Duration(seconds: 1), () {
       if (mounted) setState(() => _showScrollButtons = false);
     });
   }
+
 
   Future<void> _init() async {
     await _loadDirectoryTree();
@@ -87,11 +97,11 @@ class _MainChatScreenState extends State<MainChatScreen> {
   @override
   void dispose() {
     _hideButtonsTimer?.cancel();
-    _scrollController.removeListener(_onScroll);
-    _scrollController.dispose();
+    _itemPositionsListener.itemPositions.removeListener(_onPositionsChange);
     _streamingContent.dispose();
     super.dispose();
   }
+
 
   Future<void> _loadDirectoryTree() async {
     final tree = await DatabaseService.instance.getDirectoryTree();
@@ -102,95 +112,85 @@ class _MainChatScreenState extends State<MainChatScreen> {
     final conversation = await ConversationService.instance.create();
     setState(() {
       _currentConversation = conversation;
-      _messageKeys.clear();
     });
   }
 
   void _switchConversation(Conversation conversation) {
     setState(() {
       _currentConversation = conversation;
-      _messageKeys.clear();
     });
     Navigator.pop(context);
   }
 
   void _scrollToBottom() {
-    if (_userScrolling || !_isNearBottom) return;
-    _performScrollToBottom(animate: true);
+    if (!_isNearBottom) return;
+    _performScrollToBottom();
   }
 
-
-  void _performScrollToBottom({bool animate = true}) {
-    if (!_scrollController.hasClients) return;
+  void _performScrollToBottom() {
+    if (_currentConversation == null || _currentConversation!.messages.isEmpty) return;
+    if (!_itemScrollController.isAttached) return;
     
-    // 等待一帧确保布局完成
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!_scrollController.hasClients) return;
-      
-      final maxExtent = _scrollController.position.maxScrollExtent;
-      // 使用 clamp 确保不会超过实际范围
-      final safeOffset = maxExtent.clamp(0.0, maxExtent);
-      
-      if (animate) {
-        _scrollController.animateTo(
-          safeOffset,
-          duration: const Duration(milliseconds: 200),
-          curve: Curves.easeOut,
-        );
-      } else {
-        // 直接跳转，不使用动画，避免冲过头
-        _scrollController.jumpTo(safeOffset);
-      }
-    });
+    final lastIndex = _currentConversation!.messages.length - 1;
+    _itemScrollController.jumpTo(index: lastIndex, alignment: 0.0);
   }
 
   void _scrollToTop() {
-    if (_scrollController.hasClients) {
-      _scrollController.animateTo(0, duration: const Duration(milliseconds: 300), curve: Curves.easeOut);
-    }
+    if (!_itemScrollController.isAttached) return;
+    _itemScrollController.jumpTo(index: 0, alignment: 0.0);
   }
-
-
 
   void _forceScrollToBottom() {
+    if (_currentConversation == null || _currentConversation!.messages.isEmpty) return;
+    if (!_itemScrollController.isAttached) return;
+    
     setState(() => _isNearBottom = true);
-    // 直接跳转，不使用动画，避免冲过头
-    _performScrollToBottom(animate: false);
+    final lastIndex = _currentConversation!.messages.length - 1;
+    _itemScrollController.jumpTo(index: lastIndex, alignment: 0.0);
   }
 
-
-  // 确保滚动到底部（用于流式结束后校正）
   void _ensureScrollToBottom() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_scrollController.hasClients && mounted) {
-        final maxExtent = _scrollController.position.maxScrollExtent;
-        _scrollController.jumpTo(maxExtent.clamp(0.0, maxExtent));
-      }
+      if (mounted) _forceScrollToBottom();
     });
   }
 
-
   void _scrollToPreviousMessage() {
-
-    if (!_scrollController.hasClients || _currentConversation == null) return;
-    final currentOffset = _scrollController.offset;
-    double targetOffset = 0;
-    for (int i = _currentConversation!.messages.length - 1; i >= 0; i--) {
-      final key = _messageKeys[i];
-      if (key?.currentContext != null) {
-        final box = key!.currentContext!.findRenderObject() as RenderBox?;
-        if (box != null) {
-          final position = box.localToGlobal(Offset.zero);
-          final scrollPosition = _scrollController.offset + position.dy - 100;
-          if (scrollPosition < currentOffset - 10) {
-            targetOffset = scrollPosition.clamp(0.0, _scrollController.position.maxScrollExtent);
-            break;
-          }
-        }
-      }
-    }
-    _scrollController.animateTo(targetOffset, duration: const Duration(milliseconds: 300), curve: Curves.easeOut);
+    if (_currentConversation == null || _currentConversation!.messages.isEmpty) return;
+    if (!_itemScrollController.isAttached) return;
+    
+    final positions = _itemPositionsListener.itemPositions.value;
+    if (positions.isEmpty) return;
+    
+    final firstVisible = positions.reduce((a, b) => a.index < b.index ? a : b);
+    final targetIndex = (firstVisible.index - 1).clamp(0, _currentConversation!.messages.length - 1);
+    
+    _itemScrollController.scrollTo(
+      index: targetIndex,
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeOut,
+      alignment: 0.0,
+    );
   }
+
+  void _scrollToNextMessage() {
+    if (_currentConversation == null || _currentConversation!.messages.isEmpty) return;
+    if (!_itemScrollController.isAttached) return;
+    
+    final positions = _itemPositionsListener.itemPositions.value;
+    if (positions.isEmpty) return;
+    
+    final lastVisible = positions.reduce((a, b) => a.index > b.index ? a : b);
+    final targetIndex = (lastVisible.index + 1).clamp(0, _currentConversation!.messages.length - 1);
+    
+    _itemScrollController.scrollTo(
+      index: targetIndex,
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeOut,
+      alignment: 0.0,
+    );
+  }
+
 
   void _scrollToNextMessage() {
     if (!_scrollController.hasClients || _currentConversation == null) return;
@@ -216,10 +216,10 @@ class _MainChatScreenState extends State<MainChatScreen> {
   Future<void> _deleteMessage(int index) async {
     if (_currentConversation == null) return;
     _currentConversation!.messages.removeAt(index);
-    _messageKeys.remove(index);
     await ConversationService.instance.update(_currentConversation!);
     setState(() {});
   }
+
 
   Future<void> _editMessage(int index) async {
     if (_currentConversation == null) return;
@@ -246,7 +246,7 @@ class _MainChatScreenState extends State<MainChatScreen> {
         while (_currentConversation!.messages.length > index) {
           _currentConversation!.messages.removeLast();
         }
-        _messageKeys.clear();
+
         
         // 添加编辑后的消息
         final editedMessage = Message(
@@ -287,11 +287,11 @@ class _MainChatScreenState extends State<MainChatScreen> {
   Future<void> _regenerateMessage(int aiMessageIndex) async {
     if (_currentConversation == null) return;
     _currentConversation!.messages.removeAt(aiMessageIndex);
-    _messageKeys.remove(aiMessageIndex);
     await ConversationService.instance.update(_currentConversation!);
     setState(() {});
     await _sendMessageToAI();
   }
+
 
   Future<void> _sendAllFiles() async {
 
@@ -837,22 +837,41 @@ class _MainChatScreenState extends State<MainChatScreen> {
                           ],
                         ),
                       )
-                    : NotificationListener<ScrollNotification>(
-                        onNotification: (notification) {
-                          if (notification is ScrollStartNotification) _userScrolling = true;
-                          else if (notification is ScrollEndNotification) {
-                            _userScrolling = false;
-                            if (_scrollController.hasClients) {
-                              final maxScroll = _scrollController.position.maxScrollExtent;
-                              final currentScroll = _scrollController.offset;
-                              if ((maxScroll - currentScroll) < 50) setState(() => _isNearBottom = true);
-                            }
-                          }
-                          return false;
-                        },
-                        child: ListView.builder(
-                          controller: _scrollController,
+                    : ScrollablePositionedList.builder(
+                          itemScrollController: _itemScrollController,
+                          itemPositionsListener: _itemPositionsListener,
                           padding: const EdgeInsets.symmetric(vertical: 16),
+                          itemCount: _currentConversation!.messages.length,
+                          itemBuilder: (context, index) {
+                            final message = _currentConversation!.messages[index];
+                            
+                            // 如果是正在流式生成的消息，使用 ValueListenableBuilder 局部更新
+                            if (message.id == _streamingMessageId) {
+                              return ValueListenableBuilder<String>(
+                                valueListenable: _streamingContent,
+                                builder: (context, content, _) {
+                                  final streamingMsg = Message(
+                                    id: message.id,
+                                    role: MessageRole.assistant,
+                                    content: content,
+                                    timestamp: message.timestamp,
+                                    status: MessageStatus.sending,
+                                  );
+                                  return MessageBubble(message: streamingMsg);
+                                },
+                              );
+                            }
+                            
+                            return MessageBubble(
+                              message: message,
+                              onRetry: message.status == MessageStatus.error ? () => _sendMessage(message.content, message.attachments) : null,
+                              onDelete: () => _deleteMessage(index),
+                              onRegenerate: message.role == MessageRole.assistant && message.status == MessageStatus.sent ? () => _regenerateMessage(index) : null,
+                              onEdit: message.role == MessageRole.user && message.status == MessageStatus.sent ? () => _editMessage(index) : null,
+                            );
+                          },
+                        ),
+
                           itemCount: _currentConversation!.messages.length,
                           itemBuilder: (context, index) {
                             _messageKeys[index] ??= GlobalKey();
