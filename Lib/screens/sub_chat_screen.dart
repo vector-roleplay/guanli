@@ -80,11 +80,11 @@ class _SubChatScreenState extends State<SubChatScreen> {
     final positions = _itemPositionsListener.itemPositions.value;
     if (positions.isEmpty) return;
     
-    final lastIndex = _subConversation.messages.length - 1;
-    final isLastVisible = positions.any((pos) => pos.index == lastIndex);
+    // reverse 列表中，index 0 是最新消息（在底部）
+    final isBottomVisible = positions.any((pos) => pos.index == 0);
     
-    if (isLastVisible != _isNearBottom) {
-      setState(() => _isNearBottom = isLastVisible);
+    if (isBottomVisible != _isNearBottom) {
+      setState(() => _isNearBottom = isBottomVisible);
     }
     
     setState(() => _showScrollButtons = true);
@@ -95,6 +95,7 @@ class _SubChatScreenState extends State<SubChatScreen> {
     });
   }
 
+
   @override
   void dispose() {
     _hideButtonsTimer?.cancel();
@@ -104,27 +105,12 @@ class _SubChatScreenState extends State<SubChatScreen> {
   }
 
 
-  void _scrollToBottom() {
-    if (!_isNearBottom) return;
-    _performScrollToBottom();
-  }
+  // reverse 列表中，index 0 = 最新消息（底部），index max = 最旧消息（顶部）
 
-  void _performScrollToBottom() {
+  void _scrollToBottom() {
     if (_subConversation.messages.isEmpty) return;
     if (!_itemScrollController.isAttached) return;
     
-    final lastIndex = _subConversation.messages.length - 1;
-    _itemScrollController.jumpTo(index: lastIndex, alignment: 0.0);
-  }
-
-  void _ensureScrollToBottom() {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _forceScrollToBottom();
-    });
-  }
-
-  void _scrollToTop() {
-    if (!_itemScrollController.isAttached) return;
     _itemScrollController.jumpTo(index: 0, alignment: 0.0);
   }
 
@@ -133,19 +119,27 @@ class _SubChatScreenState extends State<SubChatScreen> {
     if (!_itemScrollController.isAttached) return;
     
     setState(() => _isNearBottom = true);
-    final lastIndex = _subConversation.messages.length - 1;
-    _itemScrollController.jumpTo(index: lastIndex, alignment: 0.0);
+    _itemScrollController.jumpTo(index: 0, alignment: 0.0);
+  }
+
+  void _scrollToTop() {
+    if (_subConversation.messages.isEmpty) return;
+    if (!_itemScrollController.isAttached) return;
+    
+    final maxIndex = _subConversation.messages.length - 1;
+    _itemScrollController.jumpTo(index: maxIndex, alignment: 0.0);
   }
 
   void _scrollToPreviousMessage() {
+    // 看更旧的消息 = 增加 index
     if (_subConversation.messages.isEmpty) return;
     if (!_itemScrollController.isAttached) return;
     
     final positions = _itemPositionsListener.itemPositions.value;
     if (positions.isEmpty) return;
     
-    final firstVisible = positions.reduce((a, b) => a.index < b.index ? a : b);
-    final targetIndex = (firstVisible.index - 1).clamp(0, _subConversation.messages.length - 1);
+    final maxVisible = positions.reduce((a, b) => a.index > b.index ? a : b);
+    final targetIndex = (maxVisible.index + 1).clamp(0, _subConversation.messages.length - 1);
     
     _itemScrollController.scrollTo(
       index: targetIndex,
@@ -156,14 +150,15 @@ class _SubChatScreenState extends State<SubChatScreen> {
   }
 
   void _scrollToNextMessage() {
+    // 看更新的消息 = 减小 index
     if (_subConversation.messages.isEmpty) return;
     if (!_itemScrollController.isAttached) return;
     
     final positions = _itemPositionsListener.itemPositions.value;
     if (positions.isEmpty) return;
     
-    final lastVisible = positions.reduce((a, b) => a.index > b.index ? a : b);
-    final targetIndex = (lastVisible.index + 1).clamp(0, _subConversation.messages.length - 1);
+    final minVisible = positions.reduce((a, b) => a.index < b.index ? a : b);
+    final targetIndex = (minVisible.index - 1).clamp(0, _subConversation.messages.length - 1);
     
     _itemScrollController.scrollTo(
       index: targetIndex,
@@ -172,6 +167,7 @@ class _SubChatScreenState extends State<SubChatScreen> {
       alignment: 0.0,
     );
   }
+
 
 
   Future<void> _initializeChat() async {
@@ -403,10 +399,11 @@ class _SubChatScreenState extends State<SubChatScreen> {
           if (now.difference(_lastUIUpdate) >= _uiUpdateInterval) {
             _lastUIUpdate = now;
             _streamingContent.value = fullResponseContent;
-            _scrollToBottom();
+            // reverse 列表不需要手动滚动，新内容自动出现在底部
           }
         },
       );
+
 
       stopwatch.stop();
       _streamingMessageId = null;
@@ -430,8 +427,9 @@ class _SubChatScreenState extends State<SubChatScreen> {
       await SubConversationService.instance.update(_subConversation);
 
       setState(() {});
-      _ensureScrollToBottom();  // 使用校正方法
+      // reverse 列表完成后自动在底部，无需额外滚动
       await _handleAIResponse(result.content);
+
 
     } catch (e) {
       // 如果是主动停止，不显示错误
@@ -621,12 +619,15 @@ class _SubChatScreenState extends State<SubChatScreen> {
                             : const CircularProgressIndicator(),
                       )
                     : ScrollablePositionedList.builder(
+                          reverse: true,  // 反转列表，新消息在底部
                           itemScrollController: _itemScrollController,
                           itemPositionsListener: _itemPositionsListener,
                           padding: const EdgeInsets.symmetric(vertical: 16),
                           itemCount: _subConversation.messages.length,
                           itemBuilder: (context, index) {
-                            final message = _subConversation.messages[index];
+                            // reverse 列表中，index 0 对应最新消息，需要反转索引
+                            final actualIndex = _subConversation.messages.length - 1 - index;
+                            final message = _subConversation.messages[actualIndex];
                             
                             if (message.id == _streamingMessageId) {
                               return ValueListenableBuilder<String>(
@@ -647,12 +648,13 @@ class _SubChatScreenState extends State<SubChatScreen> {
                             return MessageBubble(
                               message: message,
                               onRetry: message.status == MessageStatus.error ? () => _sendMessage(message.content, message.attachments) : null,
-                              onDelete: () => _deleteMessage(index),
-                              onRegenerate: message.role == MessageRole.assistant && message.status == MessageStatus.sent ? () => _regenerateMessage(index) : null,
-                              onEdit: message.role == MessageRole.user && message.status == MessageStatus.sent ? () => _editMessage(index) : null,
+                              onDelete: () => _deleteMessage(actualIndex),
+                              onRegenerate: message.role == MessageRole.assistant && message.status == MessageStatus.sent ? () => _regenerateMessage(actualIndex) : null,
+                              onEdit: message.role == MessageRole.user && message.status == MessageStatus.sent ? () => _editMessage(actualIndex) : null,
                             );
                           },
                         ),
+
 
               ),
               ChatInput(onSend: _sendMessage, enabled: !_isLoading, isGenerating: _isLoading, onStop: _stopGeneration),
