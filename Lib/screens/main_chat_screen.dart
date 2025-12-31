@@ -147,8 +147,10 @@ class _MainChatScreenState extends State<MainChatScreen> {
     if (!_itemScrollController.isAttached) return;
     
     final maxIndex = _currentConversation!.messages.length - 1;
-    _itemScrollController.jumpTo(index: maxIndex, alignment: 0.0);
+    // 使用负 alignment 补偿顶部 padding，确保完全到顶
+    _itemScrollController.jumpTo(index: maxIndex, alignment: -0.05);
   }
+
 
   void _scrollToPreviousMessage() {
     // 看更旧的消息 = 增加 index
