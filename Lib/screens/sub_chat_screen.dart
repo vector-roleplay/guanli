@@ -111,37 +111,29 @@ class _SubChatScreenState extends State<SubChatScreen> {
   void _performScrollToBottom({bool animate = true}) {
     if (!_scrollController.hasClients) return;
     
-    final maxExtent = _scrollController.position.maxScrollExtent;
-    
-    if (animate) {
-      _scrollController.animateTo(
-        maxExtent,
-        duration: const Duration(milliseconds: 300),
-        curve: Curves.easeOut,
-      ).then((_) {
-        Future.delayed(const Duration(milliseconds: 50), () {
-          if (_scrollController.hasClients) {
-            final newMaxExtent = _scrollController.position.maxScrollExtent;
-            if (_scrollController.offset < newMaxExtent - 5) {
-              _scrollController.jumpTo(newMaxExtent);
-            }
-          }
-        });
-      });
-    } else {
-      _scrollController.jumpTo(maxExtent);
-    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!_scrollController.hasClients) return;
+      
+      final maxExtent = _scrollController.position.maxScrollExtent;
+      final safeOffset = maxExtent.clamp(0.0, maxExtent);
+      
+      if (animate) {
+        _scrollController.animateTo(
+          safeOffset,
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeOut,
+        );
+      } else {
+        _scrollController.jumpTo(safeOffset);
+      }
+    });
   }
 
   void _ensureScrollToBottom() {
-    Future.delayed(const Duration(milliseconds: 100), () {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_scrollController.hasClients && mounted) {
         final maxExtent = _scrollController.position.maxScrollExtent;
-        final currentOffset = _scrollController.offset;
-        
-        if (currentOffset > maxExtent || (maxExtent - currentOffset).abs() > 50) {
-          _scrollController.jumpTo(maxExtent.clamp(0, maxExtent));
-        }
+        _scrollController.jumpTo(maxExtent.clamp(0.0, maxExtent));
       }
     });
   }
@@ -152,13 +144,11 @@ class _SubChatScreenState extends State<SubChatScreen> {
     }
   }
 
-
   void _forceScrollToBottom() {
     setState(() => _isNearBottom = true);
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _performScrollToBottom(animate: true);
-    });
+    _performScrollToBottom(animate: false);
   }
+
 
   void _scrollToPreviousMessage() {
 
@@ -449,15 +439,15 @@ class _SubChatScreenState extends State<SubChatScreen> {
           timestamp: aiMessage.timestamp,
           status: MessageStatus.sent,
           tokenUsage: TokenUsage(
-            promptTokens: result.estimatedPromptTokens,
-            completionTokens: result.estimatedCompletionTokens,
-            totalTokens: result.estimatedPromptTokens + result.estimatedCompletionTokens,
+            promptTokens: result.promptTokens,
+            completionTokens: result.completionTokens,
+            totalTokens: result.promptTokens + result.completionTokens,
             duration: stopwatch.elapsedMilliseconds / 1000,
           ),
         );
       }
-
       await SubConversationService.instance.update(_subConversation);
+
       setState(() {});
       _ensureScrollToBottom();  // 使用校正方法
       await _handleAIResponse(result.content);
