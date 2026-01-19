@@ -1069,8 +1069,14 @@ class _MainChatScreenState extends State<MainChatScreen> {
   }
 }
 
-// 编辑消息对话框
-class _EditMessageDialog extends StatefulWidget {// 文件树节点
+String _formatSize(int size) {
+    if (size < 1024) return '$size B';
+    if (size < 1024 * 1024) return '${(size / 1024).toStringAsFixed(1)} KB';
+    return '${(size / (1024 * 1024)).toStringAsFixed(1)} MB';
+  }
+}
+
+// 文件树节点
 class _FileTreeNode {
   final String name;
   final String path;
@@ -1102,7 +1108,6 @@ class _FileTreeNode {
           fileData: isLast ? data : null,
         );
       } else if (isLast) {
-        // 更新现有节点的数据
         current.children[part]!.fileData = data;
       }
 
@@ -1111,8 +1116,10 @@ class _FileTreeNode {
   }
 }
 
-
+// 编辑消息对话框
+class _EditMessageDialog extends StatefulWidget {
   final String initialContent;
+
   final List<FileAttachment> attachments;
   final List<EmbeddedFile> embeddedFiles;
 
