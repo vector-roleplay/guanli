@@ -680,7 +680,6 @@ class _MainChatScreenState extends State<MainChatScreen> {
     } catch (e) {
       // 如果是主动停止，不显示错误
       if (_stopRequested) {
-
         _streamingMessageId = null;
         setState(() {});
         return;
@@ -693,7 +692,37 @@ class _MainChatScreenState extends State<MainChatScreen> {
       }
       await ConversationService.instance.update(_currentConversation!);
       setState(() {});
+      
+      // 显示错误弹窗，方便手机调试
+      if (mounted) {
+        final detailedError = ApiService.lastError ?? e.toString();
+        showDialog(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: const Row(
+              children: [
+                Icon(Icons.error_outline, color: Colors.red),
+                SizedBox(width: 8),
+                Text('API 错误'),
+              ],
+            ),
+            content: SingleChildScrollView(
+              child: SelectableText(
+                detailedError,
+                style: const TextStyle(fontSize: 13, fontFamily: 'monospace'),
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('关闭'),
+              ),
+            ],
+          ),
+        );
+      }
     } finally {
+
       setState(() => _isLoading = false);
     }
 
