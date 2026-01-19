@@ -165,9 +165,10 @@ class _MainChatScreenState extends State<MainChatScreen> {
     if (!_itemScrollController.isAttached) return;
     
     final maxIndex = _currentConversation!.messages.length - 1;
-    // 让消息顶部对齐屏幕顶部，和返回底部保持对称逻辑
-    _itemScrollController.jumpTo(index: maxIndex, alignment: 0.0);
+    // reverse 列表中，alignment: 1.0 让消息顶部对齐视口顶部
+    _itemScrollController.jumpTo(index: maxIndex, alignment: 1.0);
   }
+
 
 
 
