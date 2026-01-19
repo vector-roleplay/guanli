@@ -365,85 +365,193 @@ class _MainChatScreenState extends State<MainChatScreen> {
   }
 
   Future<List<String>?> _showFileSelectionDialog(List<String> rootDirs, List<Map<String, dynamic>> allFiles) async {
-    // 按目录分组文件
-    Map<String, List<Map<String, dynamic>>> groupedFiles = {};
-    List<Map<String, dynamic>> rootFiles = [];
+    // 构建树形结构
+    final tree = _FileTreeNode(name: '', path: '', isDirectory: true);
     
+    // 先添加所有目录
     for (var file in allFiles) {
-      if (file['is_directory'] == 1) continue;
-      final path = file['path'] as String;
-      final parentPath = file['parent_path'] as String?;
-      
-      if (parentPath == null) {
-        rootFiles.add(file);
-      } else {
-        // 找到根目录
-        String rootDir = path.split('/').first;
-        groupedFiles.putIfAbsent(rootDir, () => []);
-        groupedFiles[rootDir]!.add(file);
+      if (file['is_directory'] == 1) {
+        final path = file['path'] as String;
+        tree.addPath(path, file, isDirectory: true);
+      }
+    }
+    
+    // 再添加所有文件
+    for (var file in allFiles) {
+      if (file['is_directory'] != 1) {
+        final path = file['path'] as String;
+        tree.addPath(path, file, isDirectory: false);
       }
     }
 
     // 选中状态
     Set<String> selectedPaths = {};
-    Set<String> selectedDirs = {};
+    // 展开状态
+    Set<String> expandedDirs = {};
 
     return await showModalBottomSheet<List<String>>(
       context: context,
       isScrollControlled: true,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setModalState) {
-          // 检查目录是否全选
-          bool isDirFullySelected(String dir) {
+          final colorScheme = Theme.of(ctx).colorScheme;
+          final totalFiles = allFiles.where((f) => f['is_directory'] != 1).length;
 
-            final files = groupedFiles[dir] ?? [];
+          // 获取目录下所有文件路径（递归）
+          List<String> getAllFilesInDir(_FileTreeNode node) {
+            List<String> files = [];
+            for (var child in node.children.values) {
+              if (child.isDirectory) {
+                files.addAll(getAllFilesInDir(child));
+              } else {
+                files.add(child.path);
+              }
+            }
+            return files;
+          }
+
+          // 检查目录是否全选
+          bool isDirFullySelected(_FileTreeNode node) {
+            final files = getAllFilesInDir(node);
             if (files.isEmpty) return false;
-            return files.every((f) => selectedPaths.contains(f['path']));
+            return files.every((f) => selectedPaths.contains(f));
           }
 
           // 检查目录是否部分选中
-          bool isDirPartiallySelected(String dir) {
-            final files = groupedFiles[dir] ?? [];
+          bool isDirPartiallySelected(_FileTreeNode node) {
+            final files = getAllFilesInDir(node);
             if (files.isEmpty) return false;
-            final selectedCount = files.where((f) => selectedPaths.contains(f['path'])).length;
+            final selectedCount = files.where((f) => selectedPaths.contains(f)).length;
             return selectedCount > 0 && selectedCount < files.length;
           }
 
           // 切换目录选择
-          void toggleDir(String dir) {
-            final files = groupedFiles[dir] ?? [];
-            if (isDirFullySelected(dir)) {
+          void toggleDir(_FileTreeNode node) {
+            final files = getAllFilesInDir(node);
+            if (isDirFullySelected(node)) {
               for (var f in files) {
-                selectedPaths.remove(f['path']);
+                selectedPaths.remove(f);
               }
-              selectedDirs.remove(dir);
             } else {
               for (var f in files) {
-                selectedPaths.add(f['path'] as String);
+                selectedPaths.add(f);
               }
-              selectedDirs.add(dir);
             }
             setModalState(() {});
           }
 
           // 全选/全不选
           void toggleAll() {
-            if (selectedPaths.length == allFiles.where((f) => f['is_directory'] != 1).length) {
+            if (selectedPaths.length == totalFiles) {
               selectedPaths.clear();
-              selectedDirs.clear();
             } else {
               for (var f in allFiles) {
                 if (f['is_directory'] != 1) {
                   selectedPaths.add(f['path'] as String);
                 }
               }
-              selectedDirs.addAll(groupedFiles.keys);
             }
             setModalState(() {});
           }
 
-          final colorScheme = Theme.of(ctx).colorScheme;
-          final totalFiles = allFiles.where((f) => f['is_directory'] != 1).length;
+          // 递归构建目录树UI
+          Widget buildTreeNode(_FileTreeNode node, int depth) {
+            final children = node.children.values.toList();
+            // 排序：目录在前，文件在后
+            children.sort((a, b) {
+              if (a.isDirectory && !b.isDirectory) return -1;
+              if (!a.isDirectory && b.isDirectory) return 1;
+              return a.name.compareTo(b.name);
+            });
+
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: children.map((child) {
+                if (child.isDirectory) {
+                  final isExpanded = expandedDirs.contains(child.path);
+                  final fileCount = getAllFilesInDir(child).length;
+                  
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      InkWell(
+                        onTap: () {
+                          setModalState(() {
+                            if (isExpanded) {
+                              expandedDirs.remove(child.path);
+                            } else {
+                              expandedDirs.add(child.path);
+                            }
+                          });
+                        },
+                        child: Padding(
+                          padding: EdgeInsets.only(left: depth * 20.0),
+                          child: Row(
+                            children: [
+                              Checkbox(
+                                value: isDirFullySelected(child) ? true : (isDirPartiallySelected(child) ? null : false),
+                                tristate: true,
+                                onChanged: (_) => toggleDir(child),
+                              ),
+                              Icon(Icons.folder, size: 20, color: colorScheme.primary),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  child.name,
+                                  style: const TextStyle(fontWeight: FontWeight.w500, fontSize: 14),
+                                ),
+                              ),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: colorScheme.secondaryContainer,
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+                                child: Text(
+                                  '$fileCount',
+                                  style: TextStyle(fontSize: 12, color: colorScheme.onSecondaryContainer),
+                                ),
+                              ),
+                              Icon(
+                                isExpanded ? Icons.expand_less : Icons.expand_more,
+                                color: colorScheme.outline,
+                              ),
+                              const SizedBox(width: 8),
+                            ],
+                          ),
+                        ),
+                      ),
+                      if (isExpanded) buildTreeNode(child, depth + 1),
+                    ],
+                  );
+                } else {
+                  // 文件
+                  return Padding(
+                    padding: EdgeInsets.only(left: depth * 20.0),
+                    child: CheckboxListTile(
+                      value: selectedPaths.contains(child.path),
+                      onChanged: (v) {
+                        setModalState(() {
+                          if (v == true) {
+                            selectedPaths.add(child.path);
+                          } else {
+                            selectedPaths.remove(child.path);
+                          }
+                        });
+                      },
+                      title: Text(child.name, style: const TextStyle(fontSize: 14)),
+                      subtitle: Text(
+                        _formatSize(child.fileData?['size'] as int? ?? 0),
+                        style: TextStyle(fontSize: 11, color: colorScheme.outline),
+                      ),
+                      dense: true,
+                      controlAffinity: ListTileControlAffinity.leading,
+                    ),
+                  );
+                }
+              }).toList(),
+            );
+          }
 
           return DraggableScrollableSheet(
             initialChildSize: 0.7,
@@ -481,85 +589,12 @@ class _MainChatScreenState extends State<MainChatScreen> {
                     ],
                   ),
                 ),
-                // 文件列表
+                // 文件树
                 Expanded(
-                  child: ListView(
+                  child: SingleChildScrollView(
                     controller: scrollController,
-                    children: [
-                      // 根目录文件
-                      if (rootFiles.isNotEmpty) ...[
-                        const Padding(
-                          padding: EdgeInsets.fromLTRB(16, 12, 16, 4),
-                          child: Text('根目录', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-                        ),
-                        ...rootFiles.map((file) => CheckboxListTile(
-                          value: selectedPaths.contains(file['path']),
-                          onChanged: (v) {
-                            setModalState(() {
-                              if (v == true) {
-                                selectedPaths.add(file['path'] as String);
-                              } else {
-                                selectedPaths.remove(file['path']);
-                              }
-                            });
-                          },
-                          title: Text(file['name'] as String, style: const TextStyle(fontSize: 14)),
-                          subtitle: Text(_formatSize(file['size'] as int? ?? 0), style: TextStyle(fontSize: 12, color: colorScheme.outline)),
-                          dense: true,
-                          controlAffinity: ListTileControlAffinity.leading,
-                        )),
-                      ],
-                      // 按仓库分组
-                      ...groupedFiles.entries.map((entry) {
-                        final dir = entry.key;
-                        final files = entry.value;
-                        final isExpanded = selectedDirs.contains(dir) || isDirPartiallySelected(dir);
-                        
-                        return ExpansionTile(
-                          leading: Checkbox(
-                            value: isDirFullySelected(dir) ? true : (isDirPartiallySelected(dir) ? null : false),
-                            tristate: true,
-                            onChanged: (_) => toggleDir(dir),
-                          ),
-                          title: Row(
-                            children: [
-                              Icon(Icons.folder, size: 20, color: colorScheme.primary),
-                              const SizedBox(width: 8),
-                              Expanded(child: Text(dir, style: const TextStyle(fontWeight: FontWeight.w500))),
-                              Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                                decoration: BoxDecoration(
-                                  color: colorScheme.secondaryContainer,
-                                  borderRadius: BorderRadius.circular(10),
-                                ),
-                                child: Text('${files.length}', style: TextStyle(fontSize: 12, color: colorScheme.onSecondaryContainer)),
-                              ),
-                            ],
-                          ),
-                          initiallyExpanded: isExpanded,
-                          children: files.map((file) => CheckboxListTile(
-                            value: selectedPaths.contains(file['path']),
-                            onChanged: (v) {
-                              setModalState(() {
-                                if (v == true) {
-                                  selectedPaths.add(file['path'] as String);
-                                } else {
-                                  selectedPaths.remove(file['path']);
-                                }
-                              });
-                            },
-                            title: Text(file['name'] as String, style: const TextStyle(fontSize: 14)),
-                            subtitle: Text(
-                              '${file['path']}\n${_formatSize(file['size'] as int? ?? 0)}',
-                              style: TextStyle(fontSize: 11, color: colorScheme.outline),
-                            ),
-                            isThreeLine: true,
-                            dense: true,
-                            controlAffinity: ListTileControlAffinity.leading,
-                          )).toList(),
-                        );
-                      }),
-                    ],
+                    padding: const EdgeInsets.symmetric(vertical: 8),
+                    child: buildTreeNode(tree, 0),
                   ),
                 ),
                 // 底部按钮
@@ -595,11 +630,6 @@ class _MainChatScreenState extends State<MainChatScreen> {
     );
   }
 
-  String _formatSize(int size) {
-    if (size < 1024) return '$size B';
-    if (size < 1024 * 1024) return '${(size / 1024).toStringAsFixed(1)} KB';
-    return '${(size / (1024 * 1024)).toStringAsFixed(1)} MB';
-  }
 
 
   Future<void> _sendMessage(String text, List<FileAttachment> attachments) async {
@@ -1040,7 +1070,48 @@ class _MainChatScreenState extends State<MainChatScreen> {
 }
 
 // 编辑消息对话框
-class _EditMessageDialog extends StatefulWidget {
+class _EditMessageDialog extends StatefulWidget {// 文件树节点
+class _FileTreeNode {
+  final String name;
+  final String path;
+  final bool isDirectory;
+  final Map<String, _FileTreeNode> children = {};
+  Map<String, dynamic>? fileData;
+
+  _FileTreeNode({
+    required this.name,
+    required this.path,
+    required this.isDirectory,
+    this.fileData,
+  });
+
+  void addPath(String filePath, Map<String, dynamic> data, {required bool isDirectory}) {
+    final parts = filePath.split('/');
+    _FileTreeNode current = this;
+
+    for (int i = 0; i < parts.length; i++) {
+      final part = parts[i];
+      final currentPath = parts.sublist(0, i + 1).join('/');
+      final isLast = i == parts.length - 1;
+
+      if (!current.children.containsKey(part)) {
+        current.children[part] = _FileTreeNode(
+          name: part,
+          path: currentPath,
+          isDirectory: isLast ? isDirectory : true,
+          fileData: isLast ? data : null,
+        );
+      } else if (isLast) {
+        // 更新现有节点的数据
+        current.children[part]!.fileData = data;
+      }
+
+      current = current.children[part]!;
+    }
+  }
+}
+
+
   final String initialContent;
   final List<FileAttachment> attachments;
   final List<EmbeddedFile> embeddedFiles;
