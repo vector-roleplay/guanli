@@ -8,6 +8,8 @@ import 'dart:math';
 import 'package:collection/collection.dart' show IterableExtension;
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/widgets.dart';
+import 'package:flutter/foundation.dart';
+
 
 import 'item_positions_listener.dart';
 import 'item_positions_notifier.dart';
@@ -126,23 +128,47 @@ class ItemScrollController {
     );
   }
 
-  /// 新增方法：直接跳到列表物理顶部
+  /// 跳到列表物理顶部（第一条消息顶边对齐屏幕顶边）
   void scrollToStart() {
-    final controller = _scrollableListState?.primary.scrollController;
-    if (controller != null && controller.hasClients) {
-      controller.jumpTo(controller.position.minScrollExtent);
-    }
+    if (_scrollableListState == null) return;
+    
+    final itemCount = _scrollableListState!.widget.itemCount;
+    if (itemCount == 0) return;
+    
+    // 直接跳到第一条消息，顶边对齐屏幕顶边
+    _scrollableListState!._jumpTo(index: 0, alignment: 0.0);
+    
+    // 确保到达物理顶部
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final controller = _scrollableListState?.primary.scrollController;
+      if (controller != null && controller.hasClients) {
+        controller.jumpTo(controller.position.minScrollExtent);
+      }
+    });
   }
 
-  /// 新增方法：直接跳到列表物理底部
+  /// 跳到列表物理底部（最后一条消息底边对齐屏幕底边）
   void scrollToEnd() {
-    final controller = _scrollableListState?.primary.scrollController;
-    if (controller != null && controller.hasClients) {
-      controller.jumpTo(controller.position.maxScrollExtent);
-    }
+    if (_scrollableListState == null) return;
+    
+    final itemCount = _scrollableListState!.widget.itemCount;
+    if (itemCount == 0) return;
+    
+    // 第一步：跳到最后一条消息，让它进入视野并渲染
+    _scrollableListState!._jumpTo(index: itemCount - 1, alignment: 0.0);
+    
+    // 第二步：等这一帧渲染完，布局完成后 maxScrollExtent 就准确了
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final controller = _scrollableListState?.primary.scrollController;
+      if (controller != null && controller.hasClients) {
+        // 跳到真正的物理底部
+        controller.jumpTo(controller.position.maxScrollExtent);
+      }
+    });
   }
 
   void _attach(_ScrollablePositionedListState scrollableListState) {
+
     assert(_scrollableListState == null);
     _scrollableListState = scrollableListState;
   }
