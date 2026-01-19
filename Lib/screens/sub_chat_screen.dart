@@ -129,32 +129,32 @@ class _SubChatScreenState extends State<SubChatScreen> {
   // 正常列表：index 0 = 最旧消息（顶部），index max = 最新消息（底部）
 
   void _scrollToBottom() {
-    // 使用 ScrollOffsetController 滚动到物理底部
-    if (_subConversation.messages.isEmpty) return;
-    
-    _scrollOffsetController.animateScroll(
-      offset: 999999999,  // 超大值，自动限制到实际最大位置
-      duration: Duration.zero,
-    );
-  }
-
-  void _forceScrollToBottom() {
-    if (_subConversation.messages.isEmpty) return;
-    
-    setState(() => _isNearBottom = true);
-    _scrollOffsetController.animateScroll(
-      offset: 999999999,
-      duration: Duration.zero,
-    );
-  }
-
-  void _scrollToTop() {
-    // 使用 ItemScrollController 跳到第一条消息，顶边对齐顶边
+    // 直接跳到列表物理底部
     if (_subConversation.messages.isEmpty) return;
     if (!_itemScrollController.isAttached) return;
     
-    _itemScrollController.jumpTo(index: 0, alignment: 0.0);
+    _itemScrollController.scrollToEnd();
   }
+
+
+  void _forceScrollToBottom() {
+    // 直接跳到列表物理底部
+    if (_subConversation.messages.isEmpty) return;
+    if (!_itemScrollController.isAttached) return;
+    
+    setState(() => _isNearBottom = true);
+    _itemScrollController.scrollToEnd();
+  }
+
+
+  void _scrollToTop() {
+    // 直接跳到列表物理顶部
+    if (_subConversation.messages.isEmpty) return;
+    if (!_itemScrollController.isAttached) return;
+    
+    _itemScrollController.scrollToStart();
+  }
+
 
 
 
