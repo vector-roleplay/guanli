@@ -86,14 +86,31 @@ class _SubChatScreenState extends State<SubChatScreen> {
     if (isBottomVisible != _isNearBottom) {
       setState(() => _isNearBottom = isBottomVisible);
     }
-    
-    setState(() => _showScrollButtons = true);
-    
-    _hideButtonsTimer?.cancel();
-    _hideButtonsTimer = Timer(const Duration(seconds: 1), () {
-      if (mounted) setState(() => _showScrollButtons = false);
-    });
+    // 不再在这里控制按钮显示，改由滚动通知控制
   }
+
+  // 处理滚动通知，只在用户手动滑动时显示按钮
+  bool _handleScrollNotification(ScrollNotification notification) {
+    // 只处理用户触发的滚动（非程序触发）
+    if (notification.depth != 0) return false;
+    
+    if (notification is ScrollStartNotification) {
+      // 开始滑动，显示按钮
+      if (!_showScrollButtons) {
+        setState(() => _showScrollButtons = true);
+      }
+      _hideButtonsTimer?.cancel();
+    } else if (notification is ScrollEndNotification) {
+      // 滑动结束，1.5秒后隐藏
+      _hideButtonsTimer?.cancel();
+      _hideButtonsTimer = Timer(const Duration(milliseconds: 1500), () {
+        if (mounted) setState(() => _showScrollButtons = false);
+      });
+    }
+    
+    return false; // 不阻止通知继续传递
+  }
+
 
 
   @override
@@ -127,10 +144,10 @@ class _SubChatScreenState extends State<SubChatScreen> {
     if (!_itemScrollController.isAttached) return;
     
     final maxIndex = _subConversation.messages.length - 1;
-    // reverse 列表中，alignment: 1.0 让 item 起始边对齐视口顶部
-    // 加一点额外偏移确保完全显示
-    _itemScrollController.jumpTo(index: maxIndex, alignment: 1.1);
+    // 让消息顶部对齐屏幕顶部，和返回底部保持对称逻辑
+    _itemScrollController.jumpTo(index: maxIndex, alignment: 0.0);
   }
+
 
 
 
@@ -622,13 +639,16 @@ class _SubChatScreenState extends State<SubChatScreen> {
                             ? Column(mainAxisAlignment: MainAxisAlignment.center, children: [Icon(Icons.history, size: 48, color: colorScheme.outline), const SizedBox(height: 16), Text('会话已恢复', style: TextStyle(color: colorScheme.outline))])
                             : const CircularProgressIndicator(),
                       )
-                    : ScrollablePositionedList.builder(
+                    : NotificationListener<ScrollNotification>(
+                        onNotification: _handleScrollNotification,
+                        child: ScrollablePositionedList.builder(
                           reverse: true,  // 反转列表，新消息在底部
                           itemScrollController: _itemScrollController,
                           itemPositionsListener: _itemPositionsListener,
                           padding: const EdgeInsets.symmetric(vertical: 16),
                           itemCount: _subConversation.messages.length,
                           itemBuilder: (context, index) {
+
                             // reverse 列表中，index 0 对应最新消息，需要反转索引
                             final actualIndex = _subConversation.messages.length - 1 - index;
                             final message = _subConversation.messages[actualIndex];
@@ -658,6 +678,8 @@ class _SubChatScreenState extends State<SubChatScreen> {
                             );
                           },
                         ),
+                      ),
+
 
 
               ),
