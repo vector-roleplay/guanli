@@ -27,7 +27,8 @@ dependencies:
   permission_handler: any
   device_info_plus: any
   scrollable_positioned_list:
-    path: Lib/third_party/scrollable_positioned_list
+    path: lib/third_party/scrollable_positioned_list
+
 
 
 
