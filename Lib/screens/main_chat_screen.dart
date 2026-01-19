@@ -1067,9 +1067,8 @@ class _MainChatScreenState extends State<MainChatScreen> {
       ),
     );
   }
-}
 
-String _formatSize(int size) {
+  String _formatSize(int size) {
     if (size < 1024) return '$size B';
     if (size < 1024 * 1024) return '${(size / 1024).toStringAsFixed(1)} KB';
     return '${(size / (1024 * 1024)).toStringAsFixed(1)} MB';
@@ -1077,6 +1076,7 @@ String _formatSize(int size) {
 }
 
 // 文件树节点
+
 class _FileTreeNode {
   final String name;
   final String path;
