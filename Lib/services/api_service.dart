@@ -58,15 +58,22 @@ class ApiService {
     return (text.length / 3).ceil();
   }
 
+  // 最后一次错误信息，用于调试显示
+  static String? lastError;
+
   // 获取模型列表
   static Future<List<String>> getModels(String apiUrl, String apiKey) async {
     try {
-      final url = Uri.parse('$apiUrl/models');
+      // 处理URL末尾斜杠
+      final baseUrl = apiUrl.endsWith('/') ? apiUrl.substring(0, apiUrl.length - 1) : apiUrl;
+      final url = Uri.parse('$baseUrl/models');
       
       final response = await http.get(
         url,
         headers: {
           'Authorization': 'Bearer $apiKey',
+          'Accept': 'application/json',
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
         },
       );
 
@@ -75,12 +82,15 @@ class ApiService {
         final models = data['data'] as List;
         return models.map((m) => m['id'].toString()).toList();
       } else {
-        throw Exception('获取模型失败: ${response.statusCode}');
+        lastError = 'getModels失败: ${response.statusCode}\n${response.body}';
+        throw Exception(lastError);
       }
     } catch (e) {
-      throw Exception('获取模型失败: $e');
+      lastError = '获取模型失败: $e';
+      throw Exception(lastError);
     }
   }
+
 
   // 流式发送到主界面AI，返回估算的token
   static Future<StreamResult> streamToMainAIWithTokens({
@@ -177,23 +187,34 @@ class ApiService {
     _activeClient = http.Client();
     
     try {
-      final request = http.Request('POST', url);
-      request.headers['Content-Type'] = 'application/json';
+      // 处理URL末尾斜杠
+      final baseUrl = apiUrl.endsWith('/') ? apiUrl.substring(0, apiUrl.length - 1) : apiUrl;
+      final requestUrl = Uri.parse('$baseUrl/chat/completions');
+      
+      final request = http.Request('POST', requestUrl);
+      request.headers['Content-Type'] = 'application/json; charset=utf-8';
       request.headers['Authorization'] = 'Bearer $apiKey';
+      request.headers['Accept'] = 'text/event-stream';
+      request.headers['User-Agent'] = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36';
+      request.headers['Cache-Control'] = 'no-cache';
+      request.headers['Connection'] = 'keep-alive';
+      
+      // 不包含 stream_options，大部分第三方API不支持
       request.body = jsonEncode({
         'model': model,
         'messages': apiMessages,
         'max_tokens': 8192,
         'stream': true,
-        'stream_options': {'include_usage': true},  // 请求返回真实 token 数据
       });
 
       final response = await _activeClient!.send(request);
 
       if (response.statusCode != 200) {
         final body = await response.stream.bytesToString();
-        throw Exception('API请求失败: ${response.statusCode} - $body');
+        lastError = 'Stream请求失败: ${response.statusCode}\nURL: $requestUrl\nBody: $body';
+        throw Exception(lastError);
       }
+
 
       StringBuffer fullContent = StringBuffer();
       int? realPromptTokens;
@@ -298,7 +319,10 @@ class ApiService {
     required String systemPrompt,
     required String directoryTree,
   }) async* {
-    final url = Uri.parse('$apiUrl/chat/completions');
+    // 处理URL末尾斜杠
+    final baseUrl = apiUrl.endsWith('/') ? apiUrl.substring(0, apiUrl.length - 1) : apiUrl;
+    final url = Uri.parse('$baseUrl/chat/completions');
+
 
     List<Map<String, dynamic>> apiMessages = [];
 
@@ -321,8 +345,13 @@ class ApiService {
     }
 
     final request = http.Request('POST', url);
-    request.headers['Content-Type'] = 'application/json';
+    request.headers['Content-Type'] = 'application/json; charset=utf-8';
     request.headers['Authorization'] = 'Bearer $apiKey';
+    request.headers['Accept'] = 'text/event-stream';
+    request.headers['User-Agent'] = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36';
+    request.headers['Cache-Control'] = 'no-cache';
+    request.headers['Connection'] = 'keep-alive';
+    
     request.body = jsonEncode({
       'model': model,
       'messages': apiMessages,
@@ -330,14 +359,18 @@ class ApiService {
       'stream': true,
     });
 
-    final response = await http.Client().send(request);
+    final client = http.Client();
+    try {
+      final response = await client.send(request);
 
-    if (response.statusCode != 200) {
-      final body = await response.stream.bytesToString();
-      throw Exception('API请求失败: ${response.statusCode} - $body');
-    }
+      if (response.statusCode != 200) {
+        final body = await response.stream.bytesToString();
+        lastError = 'Stream请求失败: ${response.statusCode}\nBody: $body';
+        throw Exception(lastError);
+      }
 
-    await for (var chunk in response.stream.transform(utf8.decoder)) {
+      await for (var chunk in response.stream.transform(utf8.decoder)) {
+
       final lines = chunk.split('\n');
       for (var line in lines) {
         if (line.startsWith('data: ')) {
@@ -360,9 +393,13 @@ class ApiService {
         }
       }
     }
+    } finally {
+      client.close();
+    }
   }
 
   // 非流式发送
+
   static Future<ApiResponse> sendToMainAI({
     required List<Message> messages,
     required String directoryTree,
