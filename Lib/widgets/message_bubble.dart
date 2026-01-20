@@ -547,14 +547,15 @@ class _MessageBubbleState extends State<MessageBubble> with AutomaticKeepAliveCl
 
     // 自定义 ExtensionSet，禁用缩进代码块，只保留围栏代码块
     final customExtensionSet = md.ExtensionSet(
-      // 过滤掉 IndentedCodeBlockSyntax
+      // 通过类名字符串过滤掉 IndentedCodeBlockSyntax
       md.ExtensionSet.gitHubFlavored.blockSyntaxes
-          .where((syntax) => syntax is! md.IndentedCodeBlockSyntax)
+          .where((syntax) => !syntax.runtimeType.toString().contains('IndentedCodeBlock'))
           .toList(),
       md.ExtensionSet.gitHubFlavored.inlineSyntaxes,
     );
 
     return MarkdownBody(
+
       data: content,
       extensionSet: customExtensionSet,
       selectable: false,
