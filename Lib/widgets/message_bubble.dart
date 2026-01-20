@@ -110,8 +110,8 @@ class _MessageBubbleState extends State<MessageBubble> with AutomaticKeepAliveCl
 
   // AI消息 - 左对齐，透明背景
   Widget _buildAIMessage(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
     final isSending = widget.message.status == MessageStatus.sending;
-
     
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -136,6 +136,7 @@ class _MessageBubbleState extends State<MessageBubble> with AutomaticKeepAliveCl
       ],
     );
   }
+
 
 
   // 附件区域
