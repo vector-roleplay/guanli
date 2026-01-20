@@ -13,13 +13,16 @@ class TokenUsage {
   final int completionTokens;
   final int totalTokens;
   final double duration;
+  final bool isRealUsage;  // 是否是API返回的真实数据
   
   TokenUsage({
     this.promptTokens = 0,
     this.completionTokens = 0,
     this.totalTokens = 0,
     this.duration = 0,
+    this.isRealUsage = false,
   });
+
 
   double get tokensPerSecond {
     if (duration <= 0) return 0;
@@ -31,6 +34,7 @@ class TokenUsage {
     'completionTokens': completionTokens,
     'totalTokens': totalTokens,
     'duration': duration,
+    'isRealUsage': isRealUsage,
   };
 
   factory TokenUsage.fromJson(Map<String, dynamic> json) => TokenUsage(
@@ -38,7 +42,9 @@ class TokenUsage {
     completionTokens: json['completionTokens'] ?? 0,
     totalTokens: json['totalTokens'] ?? 0,
     duration: (json['duration'] ?? 0).toDouble(),
+    isRealUsage: json['isRealUsage'] ?? false,
   );
+
 }
 
 // 内嵌文件数据（用于显示，不发送给API）
