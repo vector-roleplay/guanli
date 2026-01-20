@@ -186,6 +186,10 @@ class ApiService {
     // 创建可取消的 client
     _activeClient = http.Client();
     
+    // 思维链状态追踪
+    bool reasoningStarted = false;
+    bool reasoningEnded = false;
+
     try {
       // 处理URL末尾斜杠
       final baseUrl = apiUrl.endsWith('/') ? apiUrl.substring(0, apiUrl.length - 1) : apiUrl;
@@ -247,8 +251,28 @@ class ApiService {
               if (choices != null && choices.isNotEmpty) {
                 final delta = choices[0]['delta'];
                 if (delta != null) {
+                  // 先处理思维链 (reasoning_content)
+                  final reasoning = delta['reasoning_content'] ?? delta['reasoning'];
+                  if (reasoning != null && reasoning.isNotEmpty) {
+                    if (!reasoningStarted) {
+                      // 第一次收到思维链，添加开始标签
+                      fullContent.write('<think>');
+                      onChunk('<think>');
+                      reasoningStarted = true;
+                    }
+                    fullContent.write(reasoning);
+                    onChunk(reasoning);
+                  }
+                  
+                  // 再处理正文内容
                   final content = delta['content'];
                   if (content != null && content.isNotEmpty) {
+                    // 如果之前有思维链且未结束，先添加结束标签
+                    if (reasoningStarted && !reasoningEnded) {
+                      fullContent.write('</think>\n\n');
+                      onChunk('</think>\n\n');
+                      reasoningEnded = true;
+                    }
                     fullContent.write(content);
                     onChunk(content);
                   }
@@ -260,6 +284,12 @@ class ApiService {
           }
         }
       }
+      
+      // 流结束时，如果思维链未闭合，补上结束标签
+      if (reasoningStarted && !reasoningEnded) {
+        fullContent.write('</think>\n\n');
+      }
+
 
       final outputContent = fullContent.toString();
       
@@ -359,6 +389,9 @@ class ApiService {
       'stream': true,
     });
 
+    bool reasoningStarted = false;
+    bool reasoningEnded = false;
+
     final client = http.Client();
     try {
       final response = await client.send(request);
@@ -370,32 +403,56 @@ class ApiService {
       }
 
       await for (var chunk in response.stream.transform(utf8.decoder)) {
-
-      final lines = chunk.split('\n');
-      for (var line in lines) {
-        if (line.startsWith('data: ')) {
-          final data = line.substring(6).trim();
-          if (data == '[DONE]') {
-            return;
-          }
-          if (data.isNotEmpty) {
-            try {
-              final json = jsonDecode(data);
-              final delta = json['choices']?[0]?['delta'];
-              if (delta != null) {
-                final content = delta['content'];
-                if (content != null && content.isNotEmpty) {
-                  yield content;
-                }
+        final lines = chunk.split('\n');
+        for (var line in lines) {
+          if (line.startsWith('data: ')) {
+            final data = line.substring(6).trim();
+            if (data == '[DONE]') {
+              // 流结束时，如果思维链未闭合，补上结束标签
+              if (reasoningStarted && !reasoningEnded) {
+                yield '</think>\n\n';
               }
-            } catch (e) {}
+              return;
+            }
+            if (data.isNotEmpty) {
+              try {
+                final json = jsonDecode(data);
+                final delta = json['choices']?[0]?['delta'];
+                if (delta != null) {
+                  // 先处理思维链
+                  final reasoning = delta['reasoning_content'] ?? delta['reasoning'];
+                  if (reasoning != null && reasoning.isNotEmpty) {
+                    if (!reasoningStarted) {
+                      yield '<think>';
+                      reasoningStarted = true;
+                    }
+                    yield reasoning;
+                  }
+                  
+                  // 再处理正文
+                  final content = delta['content'];
+                  if (content != null && content.isNotEmpty) {
+                    if (reasoningStarted && !reasoningEnded) {
+                      yield '</think>\n\n';
+                      reasoningEnded = true;
+                    }
+                    yield content;
+                  }
+                }
+              } catch (e) {}
+            }
           }
         }
       }
-    }
+      
+      // 循环结束后，如果思维链未闭合
+      if (reasoningStarted && !reasoningEnded) {
+        yield '</think>\n\n';
+      }
     } finally {
       client.close();
     }
+
   }
 
   // 非流式发送
