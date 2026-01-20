@@ -139,10 +139,9 @@ class ApiService {
     required Function(String) onChunk,
   }) async {
     _resetCancelState();
-    
-    final url = Uri.parse('$apiUrl/chat/completions');
 
     List<Map<String, dynamic>> apiMessages = [];
+
     int totalInputLength = 0;
 
     // 系统消息
@@ -212,7 +211,8 @@ class ApiService {
       
       // 检测是否是 Claude thinking 模型
       final isThinkingModel = model.toLowerCase().contains('thinking') ||
-                              model.toLowerCase().contains('claude') && model.contains('-4-5');
+                              (model.toLowerCase().contains('claude') && model.toLowerCase().contains('-4-5'));
+
       
       if (isThinkingModel) {
         // Claude thinking 模型需要特殊参数
@@ -400,17 +400,34 @@ class ApiService {
     request.headers['Cache-Control'] = 'no-cache';
     request.headers['Connection'] = 'keep-alive';
     
-    request.body = jsonEncode({
+    // 构建请求体
+    final requestBody = <String, dynamic>{
       'model': model,
       'messages': apiMessages,
-      'max_tokens': 8192,
       'stream': true,
-    });
+    };
+    
+    // 检测是否是 Claude thinking 模型
+    final isThinkingModel = model.toLowerCase().contains('thinking') ||
+                            (model.toLowerCase().contains('claude') && model.toLowerCase().contains('-4-5'));
+    
+    if (isThinkingModel) {
+      requestBody['max_tokens'] = 16000;
+      requestBody['thinking'] = {
+        'type': 'enabled',
+        'budget_tokens': 10000,
+      };
+    } else {
+      requestBody['max_tokens'] = 8192;
+    }
+    
+    request.body = jsonEncode(requestBody);
 
     bool reasoningStarted = false;
     bool reasoningEnded = false;
 
     final client = http.Client();
+
     try {
       final response = await client.send(request);
 
@@ -545,10 +562,11 @@ class ApiService {
     
     // 检测是否是 Claude thinking 模型
     final isThinkingModel = model.toLowerCase().contains('thinking') ||
-                            model.toLowerCase().contains('claude') && model.contains('-4-5');
+                            (model.toLowerCase().contains('claude') && model.toLowerCase().contains('-4-5'));
     
     if (isThinkingModel) {
       requestBody['max_tokens'] = 16000;
+
       requestBody['thinking'] = {
         'type': 'enabled',
         'budget_tokens': 10000,
