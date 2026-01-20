@@ -226,59 +226,44 @@ class _MessageBubbleState extends State<MessageBubble> with AutomaticKeepAliveCl
     List<_ContentBlock> blocks = [];
     final isSending = widget.message.status == MessageStatus.sending;
     
-    // 提取思维链 - 支持多种格式，使用 allMatches 合并所有内容
+    // 提取思维链 - 只匹配第一组 think 标签
     String mainContent = content;
     
     if (widget.message.role != MessageRole.user) {
-      // 支持多种思维链格式
-      // 构建正则：匹配  和 
-      final String thinkingTag = 'thinking';
-      final String thinkTag = 'think';
-      final String captureGroup = '([\\s\\S]*?)';
-      
+      // 支持多种思维链格式，只取第一个匹配
       final thinkingPatterns = <RegExp>[
-        RegExp('<$thinkingTag>$captureGroup</$thinkingTag>', caseSensitive: false),
-        RegExp('<$thinkTag>$captureGroup</$thinkTag>', caseSensitive: false),
-        RegExp('<\\|thinking\\|>$captureGroup<\\|/thinking\\|>', caseSensitive: false),
+        RegExp(r'<thinking>([\s\S]*?)</thinking>', caseSensitive: false),
+        RegExp(r'<think>([\s\S]*?)</think>', caseSensitive: false),
+        RegExp(r'<\|thinking\|>([\s\S]*?)<\|/thinking\|>', caseSensitive: false),
       ];
       
-      StringBuffer thinkingContent = StringBuffer();
+      String? thinkingContent;
       String tempContent = content;
-
       
+      // 只匹配第一组闭合的思维链
       for (var regex in thinkingPatterns) {
-        final matches = regex.allMatches(tempContent);
-        for (var match in matches) {
-          final captured = match.group(1)?.trim() ?? '';
-          if (captured.isNotEmpty) {
-            if (thinkingContent.isNotEmpty) {
-              thinkingContent.write('\n\n');
-            }
-            thinkingContent.write(captured);
-          }
+        final match = regex.firstMatch(tempContent);
+        if (match != null) {
+          thinkingContent = match.group(1)?.trim();
+          // 只移除第一个匹配，保留后续内容
+          tempContent = tempContent.substring(0, match.start) + 
+                        tempContent.substring(match.end);
+          break;  // 找到第一个就停止
         }
-        // 从内容中移除匹配的思维链标签
-        tempContent = tempContent.replaceAll(regex, '');
       }
       
-      // 检测未闭合的思维链（流式中）
-      final unclosedPatterns = [
-        RegExp(r'<thinking>([\s\S]*)$', caseSensitive: false),
-        RegExp(r'<think>([\s\S]*)$', caseSensitive: false),
-      ];
-      
-      for (var regex in unclosedPatterns) {
-        if (regex.hasMatch(tempContent)) {
+      // 检测未闭合的思维链（流式中）- 只在没有找到闭合标签时检测
+      if (thinkingContent == null) {
+        final unclosedPatterns = [
+          RegExp(r'^<thinking>([\s\S]*)$', caseSensitive: false),
+          RegExp(r'^<think>([\s\S]*)$', caseSensitive: false),
+        ];
+        
+        for (var regex in unclosedPatterns) {
           final match = regex.firstMatch(tempContent);
           if (match != null) {
-            final captured = match.group(1)?.trim() ?? '';
-            if (captured.isNotEmpty) {
-              if (thinkingContent.isNotEmpty) {
-                thinkingContent.write('\n\n');
-              }
-              thinkingContent.write(captured);
-            }
-            tempContent = tempContent.substring(0, match.start).trim();
+            thinkingContent = match.group(1)?.trim();
+            tempContent = '';  // 全部是未闭合的思维链
             break;
           }
         }
@@ -287,10 +272,11 @@ class _MessageBubbleState extends State<MessageBubble> with AutomaticKeepAliveCl
       mainContent = tempContent.trim();
       
       // 只有内容非空时才添加思维链块
-      if (thinkingContent.isNotEmpty) {
-        blocks.add(_ContentBlock(type: _BlockType.thinking, content: thinkingContent.toString()));
+      if (thinkingContent != null && thinkingContent.isNotEmpty) {
+        blocks.add(_ContentBlock(type: _BlockType.thinking, content: thinkingContent));
       }
     }
+
 
     
     if (mainContent.isEmpty) return blocks;
