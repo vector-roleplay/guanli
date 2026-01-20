@@ -3,9 +3,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
+import 'package:markdown/markdown.dart' as md;
 import 'dart:io';
 import '../models/message.dart';
 import 'file_attachment_view.dart';
+
 
 class MessageBubble extends StatefulWidget {
   final Message message;
@@ -224,27 +226,66 @@ class _MessageBubbleState extends State<MessageBubble> with AutomaticKeepAliveCl
     List<_ContentBlock> blocks = [];
     final isSending = widget.message.status == MessageStatus.sending;
     
-    // 提取思维链（处理未闭合的情况）
-    final thinkingRegex = RegExp(r'<think(?:ing)?>([\s\S]*?)</think(?:ing)?>', caseSensitive: false);
-    final thinkMatch = thinkingRegex.firstMatch(content);
-    
-    // 检测未闭合的思维链
-    final hasOpenThink = RegExp(r'<think(?:ing)?>(?![\s\S]*</think(?:ing)?>)', caseSensitive: false).hasMatch(content);
-    
+    // 提取思维链 - 支持多种格式，使用 allMatches 合并所有内容
     String mainContent = content;
-    if (thinkMatch != null && widget.message.role != MessageRole.user) {
-      // 完整的思维链，正常处理
-      blocks.add(_ContentBlock(type: _BlockType.thinking, content: thinkMatch.group(1) ?? ''));
-      mainContent = content.replaceAll(thinkingRegex, '').trim();
-    } else if (hasOpenThink && widget.message.role != MessageRole.user) {
-      // 未闭合的思维链（流式中）
-      final openMatch = RegExp(r'<think(?:ing)?>([\s\S]*)', caseSensitive: false).firstMatch(content);
-      if (openMatch != null) {
-        // 流式时显示为正在思考的内容
-        blocks.add(_ContentBlock(type: _BlockType.thinking, content: openMatch.group(1) ?? ''));
-        mainContent = content.substring(0, openMatch.start).trim();
+    
+    if (widget.message.role != MessageRole.user) {
+      // 支持多种思维链格式
+      final thinkingPatterns = [
+        RegExp(r'', caseSensitive: false),
+        RegExp(r'', caseSensitive: false),
+        RegExp(r'<\|thinking\|>([\s\S]*?)<\|/thinking\|>', caseSensitive: false),
+      ];
+      
+      StringBuffer thinkingContent = StringBuffer();
+      String tempContent = content;
+      
+      for (var regex in thinkingPatterns) {
+        final matches = regex.allMatches(tempContent);
+        for (var match in matches) {
+          final captured = match.group(1)?.trim() ?? '';
+          if (captured.isNotEmpty) {
+            if (thinkingContent.isNotEmpty) {
+              thinkingContent.write('\n\n');
+            }
+            thinkingContent.write(captured);
+          }
+        }
+        // 从内容中移除匹配的思维链标签
+        tempContent = tempContent.replaceAll(regex, '');
+      }
+      
+      // 检测未闭合的思维链（流式中）
+      final unclosedPatterns = [
+        RegExp(r'<thinking>([\s\S]*)$', caseSensitive: false),
+        RegExp(r'<think>([\s\S]*)$', caseSensitive: false),
+      ];
+      
+      for (var regex in unclosedPatterns) {
+        if (regex.hasMatch(tempContent)) {
+          final match = regex.firstMatch(tempContent);
+          if (match != null) {
+            final captured = match.group(1)?.trim() ?? '';
+            if (captured.isNotEmpty) {
+              if (thinkingContent.isNotEmpty) {
+                thinkingContent.write('\n\n');
+              }
+              thinkingContent.write(captured);
+            }
+            tempContent = tempContent.substring(0, match.start).trim();
+            break;
+          }
+        }
+      }
+      
+      mainContent = tempContent.trim();
+      
+      // 只有内容非空时才添加思维链块
+      if (thinkingContent.isNotEmpty) {
+        blocks.add(_ContentBlock(type: _BlockType.thinking, content: thinkingContent.toString()));
       }
     }
+
     
     if (mainContent.isEmpty) return blocks;
     
@@ -498,12 +539,22 @@ class _MessageBubbleState extends State<MessageBubble> with AutomaticKeepAliveCl
     final colorScheme = Theme.of(context).colorScheme;
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
+    // 自定义 ExtensionSet，禁用缩进代码块，只保留围栏代码块
+    final customExtensionSet = md.ExtensionSet(
+      // 过滤掉 IndentedCodeBlockSyntax
+      md.ExtensionSet.gitHubFlavored.blockSyntaxes
+          .where((syntax) => syntax is! md.IndentedCodeBlockSyntax)
+          .toList(),
+      md.ExtensionSet.gitHubFlavored.inlineSyntaxes,
+    );
+
     return MarkdownBody(
       data: content,
-
+      extensionSet: customExtensionSet,
       selectable: false,
       softLineBreak: true,
       styleSheet: MarkdownStyleSheet(
+
         p: TextStyle(
           color: colorScheme.onSurface,
           fontSize: 15,
