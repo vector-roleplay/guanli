@@ -224,9 +224,9 @@ class _MessageBubbleState extends State<MessageBubble> with AutomaticKeepAliveCl
 
   List<_ContentBlock> _parseContent(String content) {
     List<_ContentBlock> blocks = [];
-    final isSending = widget.message.status == MessageStatus.sending;
     
     // 提取思维链 - 只匹配第一组 think 标签
+
     String mainContent = content;
     
     if (widget.message.role != MessageRole.user) {
@@ -282,7 +282,9 @@ class _MessageBubbleState extends State<MessageBubble> with AutomaticKeepAliveCl
     if (mainContent.isEmpty) return blocks;
     
     // 提取代码块（处理未闭合的情况）
+    final isSending = widget.message.status == MessageStatus.sending;
     final codeBlockRegex = RegExp(r'```(\w*)\n?([\s\S]*?)```');
+
     final matches = codeBlockRegex.allMatches(mainContent).toList();
     
     // 检测未闭合的代码块
