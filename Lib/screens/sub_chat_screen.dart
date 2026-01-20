@@ -453,7 +453,9 @@ class _SubChatScreenState extends State<SubChatScreen> {
             completionTokens: result.completionTokens,
             totalTokens: result.promptTokens + result.completionTokens,
             duration: stopwatch.elapsedMilliseconds / 1000,
+            isRealUsage: result.isRealUsage,
           ),
+
         );
       }
       await SubConversationService.instance.update(_subConversation);
