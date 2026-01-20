@@ -236,6 +236,7 @@ class _MessageBubbleState extends State<MessageBubble> with AutomaticKeepAliveCl
         RegExp(r'', caseSensitive: false),
         RegExp(r'<\|thinking\|>([\s\S]*?)<\|/thinking\|>', caseSensitive: false),
       ];
+
       
       StringBuffer thinkingContent = StringBuffer();
       String tempContent = content;
