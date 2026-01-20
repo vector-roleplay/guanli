@@ -209,24 +209,11 @@ class ApiService {
         'stream': true,
       };
       
-      // 检测是否是 Claude thinking 模型
-      final isThinkingModel = model.toLowerCase().contains('thinking') ||
-                              (model.toLowerCase().contains('claude') && model.toLowerCase().contains('-4-5'));
-
-      
-      if (isThinkingModel) {
-        // Claude thinking 模型需要特殊参数
-        // max_tokens 必须大于 budget_tokens
-        requestBody['max_tokens'] = 16000;
-        requestBody['thinking'] = {
-          'type': 'enabled',
-          'budget_tokens': 10000,
-        };
-      } else {
-        requestBody['max_tokens'] = 8192;
-      }
+      // 不发送 thinking 参数，让反代使用它自己的设置
+      requestBody['max_tokens'] = 32000;
       
       request.body = jsonEncode(requestBody);
+
 
 
       final response = await _activeClient!.send(request);
@@ -407,23 +394,13 @@ class ApiService {
       'stream': true,
     };
     
-    // 检测是否是 Claude thinking 模型
-    final isThinkingModel = model.toLowerCase().contains('thinking') ||
-                            (model.toLowerCase().contains('claude') && model.toLowerCase().contains('-4-5'));
-    
-    if (isThinkingModel) {
-      requestBody['max_tokens'] = 16000;
-      requestBody['thinking'] = {
-        'type': 'enabled',
-        'budget_tokens': 10000,
-      };
-    } else {
-      requestBody['max_tokens'] = 8192;
-    }
+    // 不发送 thinking 参数，让反代使用它自己的设置
+    requestBody['max_tokens'] = 32000;
     
     request.body = jsonEncode(requestBody);
 
     bool reasoningStarted = false;
+
     bool reasoningEnded = false;
 
     final client = http.Client();
@@ -560,22 +537,11 @@ class ApiService {
       'messages': apiMessages,
     };
     
-    // 检测是否是 Claude thinking 模型
-    final isThinkingModel = model.toLowerCase().contains('thinking') ||
-                            (model.toLowerCase().contains('claude') && model.toLowerCase().contains('-4-5'));
-    
-    if (isThinkingModel) {
-      requestBody['max_tokens'] = 16000;
-
-      requestBody['thinking'] = {
-        'type': 'enabled',
-        'budget_tokens': 10000,
-      };
-    } else {
-      requestBody['max_tokens'] = 8192;
-    }
+    // 不发送 thinking 参数，让反代使用它自己的设置
+    requestBody['max_tokens'] = 32000;
     
     final response = await http.post(
+
       url,
       headers: {
         'Content-Type': 'application/json',
