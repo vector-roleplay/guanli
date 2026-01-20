@@ -21,7 +21,9 @@ dependencies:
   path_provider: any
   mime: any
   flutter_markdown: any
+  markdown: any
   image_picker: any
+
   shared_preferences: any
   uuid: any
   permission_handler: any
