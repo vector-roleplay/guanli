@@ -725,7 +725,9 @@ class _MainChatScreenState extends State<MainChatScreen> {
             completionTokens: result.completionTokens,
             totalTokens: result.promptTokens + result.completionTokens,
             duration: stopwatch.elapsedMilliseconds / 1000,
+            isRealUsage: result.isRealUsage,
           ),
+
         );
       }
       await ConversationService.instance.update(_currentConversation!);
