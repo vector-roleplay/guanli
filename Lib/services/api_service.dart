@@ -203,13 +203,31 @@ class ApiService {
       request.headers['Cache-Control'] = 'no-cache';
       request.headers['Connection'] = 'keep-alive';
       
-      // 不包含 stream_options，大部分第三方API不支持
-      request.body = jsonEncode({
+      // 构建请求体
+      final requestBody = <String, dynamic>{
         'model': model,
         'messages': apiMessages,
-        'max_tokens': 8192,
         'stream': true,
-      });
+      };
+      
+      // 检测是否是 Claude thinking 模型
+      final isThinkingModel = model.toLowerCase().contains('thinking') ||
+                              model.toLowerCase().contains('claude') && model.contains('-4-5');
+      
+      if (isThinkingModel) {
+        // Claude thinking 模型需要特殊参数
+        // max_tokens 必须大于 budget_tokens
+        requestBody['max_tokens'] = 16000;
+        requestBody['thinking'] = {
+          'type': 'enabled',
+          'budget_tokens': 10000,
+        };
+      } else {
+        requestBody['max_tokens'] = 8192;
+      }
+      
+      request.body = jsonEncode(requestBody);
+
 
       final response = await _activeClient!.send(request);
 
@@ -519,18 +537,35 @@ class ApiService {
       apiMessages.add(apiFormat);
     }
 
+    // 构建请求体
+    final requestBody = <String, dynamic>{
+      'model': model,
+      'messages': apiMessages,
+    };
+    
+    // 检测是否是 Claude thinking 模型
+    final isThinkingModel = model.toLowerCase().contains('thinking') ||
+                            model.toLowerCase().contains('claude') && model.contains('-4-5');
+    
+    if (isThinkingModel) {
+      requestBody['max_tokens'] = 16000;
+      requestBody['thinking'] = {
+        'type': 'enabled',
+        'budget_tokens': 10000,
+      };
+    } else {
+      requestBody['max_tokens'] = 8192;
+    }
+    
     final response = await http.post(
       url,
       headers: {
         'Content-Type': 'application/json',
         'Authorization': 'Bearer $apiKey',
       },
-      body: jsonEncode({
-        'model': model,
-        'messages': apiMessages,
-        'max_tokens': 8192,
-      }),
+      body: jsonEncode(requestBody),
     );
+
 
     if (response.statusCode == 200) {
       final data = jsonDecode(utf8.decode(response.bodyBytes));
