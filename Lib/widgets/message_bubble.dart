@@ -231,14 +231,14 @@ class _MessageBubbleState extends State<MessageBubble> with AutomaticKeepAliveCl
     
     if (widget.message.role != MessageRole.user) {
       // 支持多种思维链格式
-      final thinkingPatterns = [
-        RegExp(r'', caseSensitive: false),
-        RegExp(r'', caseSensitive: false),
-        RegExp(r'<\|thinking\|>([\s\S]*?)<\|/thinking\|>', caseSensitive: false),
+      final thinkingPatterns = <RegExp>[
+        RegExp('', caseSensitive: false),
+        RegExp('', caseSensitive: false),
+        RegExp('<\\|thinking\\|>([\\s\\S]*?)<\\|/thinking\\|>', caseSensitive: false),
       ];
-
       
       StringBuffer thinkingContent = StringBuffer();
+
       String tempContent = content;
       
       for (var regex in thinkingPatterns) {
