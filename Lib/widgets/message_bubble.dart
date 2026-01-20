@@ -85,8 +85,8 @@ class _MessageBubbleState extends State<MessageBubble> with AutomaticKeepAliveCl
 
   // 用户消息 - 右对齐，黑灰色背景，短消息短气泡
   Widget _buildUserMessage(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
     final isDark = Theme.of(context).brightness == Brightness.dark;
+
     
     return Container(
       constraints: BoxConstraints(
@@ -110,8 +110,8 @@ class _MessageBubbleState extends State<MessageBubble> with AutomaticKeepAliveCl
 
   // AI消息 - 左对齐，透明背景
   Widget _buildAIMessage(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
     final isSending = widget.message.status == MessageStatus.sending;
+
     
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -140,8 +140,8 @@ class _MessageBubbleState extends State<MessageBubble> with AutomaticKeepAliveCl
 
   // 附件区域
   Widget _buildAttachmentsSection(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
     final isUser = widget.message.role == MessageRole.user;
+
     
     return Column(
       crossAxisAlignment: isUser ? CrossAxisAlignment.end : CrossAxisAlignment.start,
