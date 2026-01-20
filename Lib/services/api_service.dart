@@ -244,15 +244,20 @@ class ApiService {
             try {
               final json = jsonDecode(data);
               
-              // 解析 usage（通常在最后一个 chunk 中）
-              final usage = json['usage'];
-              if (usage != null) {
-                realPromptTokens = usage['prompt_tokens'] as int?;
-                realCompletionTokens = usage['completion_tokens'] as int?;
+              // 解析 usage（在最后一个 chunk 中，与 finish_reason 一起返回）
+              if (json['usage'] != null) {
+                final usage = json['usage'] as Map<String, dynamic>;
+                realPromptTokens = usage['prompt_tokens'] as int? ?? 
+                                   usage['promptTokens'] as int?;  // 兼容不同格式
+                realCompletionTokens = usage['completion_tokens'] as int? ?? 
+                                       usage['completionTokens'] as int?;
+                // 调试：打印收到的真实 token 数据
+                print('📊 收到真实Token: prompt=$realPromptTokens, completion=$realCompletionTokens');
               }
               
               // 解析内容
               final choices = json['choices'] as List?;
+
               if (choices != null && choices.isNotEmpty) {
                 final delta = choices[0]['delta'];
                 if (delta != null) {
