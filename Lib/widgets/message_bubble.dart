@@ -29,9 +29,11 @@ class MessageBubble extends StatefulWidget {
 
 class _MessageBubbleState extends State<MessageBubble> with AutomaticKeepAliveClientMixin {
   bool _thinkingExpanded = false;
+  bool _showRawText = false;
   
   String? _cachedContent;
   List<_ContentBlock>? _cachedBlocks;
+
 
   @override
   bool get wantKeepAlive => true;
@@ -173,6 +175,32 @@ class _MessageBubbleState extends State<MessageBubble> with AutomaticKeepAliveCl
   Widget _buildFullContent(BuildContext context) {
     final content = widget.message.content;
     final isSending = widget.message.status == MessageStatus.sending;
+    final colorScheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    
+    // 如果显示原始文本
+    if (_showRawText && !isSending) {
+      return Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: isDark ? const Color(0xFF1E1E1E) : const Color(0xFFF6F8FA),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(
+            color: isDark ? const Color(0xFF3C3C3C) : const Color(0xFFE1E4E8),
+          ),
+        ),
+        child: SelectableText(
+          content,
+          style: TextStyle(
+            fontFamily: 'monospace',
+            fontSize: 13,
+            color: colorScheme.onSurface,
+            height: 1.5,
+          ),
+        ),
+      );
+    }
     
     // 流式时不缓存（内容在变），静止时缓存
     if (isSending) {
@@ -188,6 +216,7 @@ class _MessageBubbleState extends State<MessageBubble> with AutomaticKeepAliveCl
     
     return SelectionArea(child: _buildParsedContent(context, _cachedBlocks!));
   }
+
 
 
   List<_ContentBlock> _parseContent(String content) {
@@ -275,12 +304,15 @@ class _MessageBubbleState extends State<MessageBubble> with AutomaticKeepAliveCl
 
 
   Widget _buildParsedContent(BuildContext context, List<_ContentBlock> blocks) {
+    // 计算思考时间（从tokenUsage中获取）
+    final thinkingDuration = widget.message.tokenUsage?.duration;
+    
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: blocks.map((block) {
         switch (block.type) {
           case _BlockType.thinking:
-            return _buildThinkingBlock(context, block.content);
+            return _buildThinkingBlock(context, block.content, thinkingDuration: thinkingDuration);
           case _BlockType.code:
             return _buildCodeBlock(context, block.content, block.language);
           case _BlockType.markdown:
@@ -290,10 +322,17 @@ class _MessageBubbleState extends State<MessageBubble> with AutomaticKeepAliveCl
     );
   }
 
-  // 思维链 - 圆角按钮样式
-  Widget _buildThinkingBlock(BuildContext context, String content) {
+
+  // 思维链 - 参考图片样式
+  Widget _buildThinkingBlock(BuildContext context, String content, {double? thinkingDuration}) {
     final colorScheme = Theme.of(context).colorScheme;
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    
+    // 格式化思考时间
+    String durationText = '';
+    if (thinkingDuration != null && thinkingDuration > 0) {
+      durationText = ' (${thinkingDuration.toStringAsFixed(1)}s)';
+    }
     
     return GestureDetector(
       onTap: () => setState(() => _thinkingExpanded = !_thinkingExpanded),
@@ -302,35 +341,36 @@ class _MessageBubbleState extends State<MessageBubble> with AutomaticKeepAliveCl
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // 折叠按钮
+            // 折叠按钮 - 参考图片样式
             Container(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
               decoration: BoxDecoration(
-                color: isDark ? const Color(0xFF2C2C2E) : const Color(0xFFF2F2F7),
-                borderRadius: BorderRadius.circular(20),
+                color: isDark ? const Color(0xFF1E3A5F) : const Color(0xFFE3F2FD),
+                borderRadius: BorderRadius.circular(22),
               ),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
+                  // 使用交叉图标，类似图片中的样式
                   Icon(
-                    Icons.psychology,
-                    size: 18,
-                    color: colorScheme.primary,
+                    Icons.blur_on,
+                    size: 20,
+                    color: isDark ? const Color(0xFF64B5F6) : const Color(0xFF1976D2),
                   ),
-                  const SizedBox(width: 6),
+                  const SizedBox(width: 8),
                   Text(
-                    '深度思考',
+                    '深度思考$durationText',
                     style: TextStyle(
                       fontSize: 14,
-                      color: colorScheme.onSurface,
+                      color: isDark ? const Color(0xFFE3F2FD) : const Color(0xFF1565C0),
                       fontWeight: FontWeight.w500,
                     ),
                   ),
-                  const SizedBox(width: 4),
+                  const SizedBox(width: 6),
                   Icon(
-                    _thinkingExpanded ? Icons.expand_less : Icons.expand_more,
-                    size: 18,
-                    color: colorScheme.onSurfaceVariant,
+                    _thinkingExpanded ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down,
+                    size: 20,
+                    color: isDark ? const Color(0xFF90CAF9) : const Color(0xFF1976D2),
                   ),
                 ],
               ),
@@ -339,20 +379,20 @@ class _MessageBubbleState extends State<MessageBubble> with AutomaticKeepAliveCl
             if (_thinkingExpanded)
               Container(
                 margin: const EdgeInsets.only(top: 8),
-                padding: const EdgeInsets.all(12),
+                padding: const EdgeInsets.all(14),
                 decoration: BoxDecoration(
-                  color: isDark ? const Color(0xFF1C1C1E) : const Color(0xFFF8F8F8),
+                  color: isDark ? const Color(0xFF0D1B2A) : const Color(0xFFF5F9FF),
                   borderRadius: BorderRadius.circular(12),
                   border: Border.all(
-                    color: colorScheme.outline.withOpacity(0.2),
+                    color: isDark ? const Color(0xFF1E3A5F) : const Color(0xFFBBDEFB),
                   ),
                 ),
-                child: Text(
+                child: SelectableText(
                   content.trim(),
                   style: TextStyle(
                     fontSize: 13,
                     color: colorScheme.onSurfaceVariant,
-                    height: 1.5,
+                    height: 1.6,
                   ),
                 ),
               ),
@@ -361,6 +401,7 @@ class _MessageBubbleState extends State<MessageBubble> with AutomaticKeepAliveCl
       ),
     );
   }
+
 
   // 代码块 - 整体化样式
   Widget _buildCodeBlock(BuildContext context, String code, String? language) {
@@ -683,9 +724,17 @@ class _MessageBubbleState extends State<MessageBubble> with AutomaticKeepAliveCl
               },
               colorScheme: colorScheme,
             ),
+          // AI消息：查看原始文本按钮
+          if (isAI && widget.message.content.isNotEmpty)
+            _buildActionButton(
+              icon: _showRawText ? Icons.visibility_off : Icons.code,
+              onTap: () => setState(() => _showRawText = !_showRawText),
+              colorScheme: colorScheme,
+            ),
           // 用户消息：编辑按钮
           if (isUser && widget.onEdit != null)
             _buildActionButton(icon: Icons.edit, onTap: widget.onEdit!, colorScheme: colorScheme),
+
 
 
           // AI消息：重新生成按钮
