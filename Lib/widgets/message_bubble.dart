@@ -744,12 +744,30 @@ class _MessageBubbleState extends State<MessageBubble> with AutomaticKeepAliveCl
         Wrap(
           spacing: 12,
           children: [
-            if (isAI && usage != null) ...[
-              Text('↑${_formatNumber(usage.promptTokens)}', style: TextStyle(fontSize: 10, color: colorScheme.outline.withOpacity(0.6))),
-              Text('↓${_formatNumber(usage.completionTokens)}', style: TextStyle(fontSize: 10, color: colorScheme.outline.withOpacity(0.6))),
-              if (usage.tokensPerSecond > 0) 
-                Text('${usage.tokensPerSecond.toStringAsFixed(1)}/s', style: TextStyle(fontSize: 10, color: colorScheme.outline.withOpacity(0.6))),
-            ],
+if (isAI && usage != null) ...[
+          // 如果是估算值，显示 ~ 前缀
+          Text(
+            '↑${usage.isRealUsage ? '' : '~'}${_formatNumber(usage.promptTokens)}',
+            style: TextStyle(
+              fontSize: 10, 
+              color: usage.isRealUsage 
+                  ? colorScheme.primary.withOpacity(0.7)  // 真实值用主题色
+                  : colorScheme.outline.withOpacity(0.6),  // 估算值用灰色
+            ),
+          ),
+          Text(
+            '↓${usage.isRealUsage ? '' : '~'}${_formatNumber(usage.completionTokens)}',
+            style: TextStyle(
+              fontSize: 10, 
+              color: usage.isRealUsage 
+                  ? colorScheme.primary.withOpacity(0.7)
+                  : colorScheme.outline.withOpacity(0.6),
+            ),
+          ),
+          if (usage.tokensPerSecond > 0) 
+            Text('${usage.tokensPerSecond.toStringAsFixed(1)}/s', style: TextStyle(fontSize: 10, color: colorScheme.outline.withOpacity(0.6))),
+        ],
+
             Text(_formatTime(widget.message.timestamp), style: TextStyle(fontSize: 10, color: colorScheme.outline.withOpacity(0.5))),
           ],
         ),
