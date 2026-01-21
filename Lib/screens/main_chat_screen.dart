@@ -195,7 +195,12 @@ class _MainChatScreenState extends State<MainChatScreen> {
     if (!_itemScrollController.isAttached) return;
     
     _itemScrollController.scrollToEnd();
+    // 确保列表可见（用于发送消息后的滚动）
+    if (!_isListReady && mounted) {
+      setState(() => _isListReady = true);
+    }
   }
+
 
 
   void _forceScrollToBottom() {
