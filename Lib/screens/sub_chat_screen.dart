@@ -661,10 +661,9 @@ class _SubChatScreenState extends State<SubChatScreen> {
                           scrollOffsetController: _scrollOffsetController,
                           padding: const EdgeInsets.symmetric(vertical: 16),
                           // 初始显示底部（最新消息）
-                          initialScrollIndex: _subConversation.messages.isEmpty 
-                              ? 0 
-                              : _subConversation.messages.length - 1,
+                          initialScrollIndex: _subConversation.messages.length - 1,
                           initialAlignment: 1.0,  // 对齐到视口底部
+
                           itemCount: _subConversation.messages.length,
 
                           itemBuilder: (context, index) {
