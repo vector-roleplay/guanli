@@ -50,6 +50,8 @@ class _MainChatScreenState extends State<MainChatScreen> {
   bool _showScrollButtons = false;
   bool _isNearBottom = true;
   Timer? _hideButtonsTimer;
+  bool _isListReady = false;  // 列表渲染并跳转完成后才显示
+
   
   // 流式消息专用 - 避免整个列表重建
   final ValueNotifier<String> _streamingContent = ValueNotifier('');
@@ -122,17 +124,31 @@ class _MainChatScreenState extends State<MainChatScreen> {
   }
 
   void _scrollToBottomAfterRender() {
-    if (_currentConversation == null || _currentConversation!.messages.isEmpty) return;
-    if (!_itemScrollController.isAttached) return;
+    if (_currentConversation == null || _currentConversation!.messages.isEmpty) {
+      // 没有消息，直接显示
+      if (mounted) setState(() => _isListReady = true);
+      return;
+    }
+    if (!_itemScrollController.isAttached) {
+      // 控制器未附加，等下一帧再试
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _scrollToBottomAfterRender();
+      });
+      return;
+    }
     
     // 第一步：跳到最后一条消息让它渲染
     _itemScrollController.jumpTo(index: _currentConversation!.messages.length - 1);
     
     // 第二步：等渲染完再跳到物理底部
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!_itemScrollController.isAttached) return;
       _itemScrollController.scrollToEnd();
+      // 第三步：跳转完成后显示列表
+      if (mounted) setState(() => _isListReady = true);
     });
   }
+
 
 
   @override
@@ -159,6 +175,7 @@ class _MainChatScreenState extends State<MainChatScreen> {
   void _switchConversation(Conversation conversation) {
     setState(() {
       _currentConversation = conversation;
+      _isListReady = false;  // 重置，等待重新定位
     });
     Navigator.pop(context);
     // 切换会话后滚动到底部
@@ -166,6 +183,7 @@ class _MainChatScreenState extends State<MainChatScreen> {
       _scrollToBottomAfterRender();
     });
   }
+
 
 
 
@@ -932,9 +950,12 @@ class _MainChatScreenState extends State<MainChatScreen> {
                           ],
                         ),
                       )
-                    : NotificationListener<ScrollNotification>(
-                        onNotification: _handleScrollNotification,
-                        child: ScrollablePositionedList.builder(
+                    : Opacity(
+                        opacity: _isListReady ? 1.0 : 0.0,
+                        child: NotificationListener<ScrollNotification>(
+                          onNotification: _handleScrollNotification,
+                          child: ScrollablePositionedList.builder(
+
                           // 正常列表，旧消息在上，新消息在下
                           itemScrollController: _itemScrollController,
                           itemPositionsListener: _itemPositionsListener,
@@ -980,11 +1001,13 @@ class _MainChatScreenState extends State<MainChatScreen> {
                           },
                         ),
                       ),
+                    ),
 
 
 
               ),
               ChatInput(onSend: _sendMessage, enabled: !_isLoading, isGenerating: _isLoading, onStop: _stopGeneration),
+
 
             ],
           ),
