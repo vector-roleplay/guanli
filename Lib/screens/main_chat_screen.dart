@@ -137,17 +137,20 @@ class _MainChatScreenState extends State<MainChatScreen> {
       return;
     }
     
-    // 第一步：跳到最后一条消息让它渲染
+    // 第一步：跳到最后一条消息让它渲染（列表此时透明）
     _itemScrollController.jumpTo(index: _currentConversation!.messages.length - 1);
     
     // 第二步：等渲染完再跳到物理底部
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!_itemScrollController.isAttached) return;
       _itemScrollController.scrollToEnd();
-      // 第三步：跳转完成后显示列表
-      if (mounted) setState(() => _isListReady = true);
+      // 第三步：等 scrollToEnd 内部的回调执行完，再显示列表
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) setState(() => _isListReady = true);
+      });
     });
   }
+
 
 
 
@@ -966,12 +969,9 @@ class _MainChatScreenState extends State<MainChatScreen> {
                           itemPositionsListener: _itemPositionsListener,
                           scrollOffsetController: _scrollOffsetController,
                           padding: const EdgeInsets.symmetric(vertical: 16),
-                          // 初始定位到最后一条消息
-                          initialScrollIndex: _currentConversation!.messages.length - 1,
-                          initialAlignment: 0.0,
-
-
+                          // 不设置 initialScrollIndex，完全依赖 _scrollToBottomAfterRender() 定位
                           itemCount: _currentConversation!.messages.length,
+
 
                           itemBuilder: (context, index) {
                             // 正常列表，index 直接对应消息索引
