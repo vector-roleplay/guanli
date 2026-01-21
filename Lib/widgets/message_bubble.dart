@@ -552,9 +552,9 @@ class _MessageBubbleState extends State<MessageBubble> with AutomaticKeepAliveCl
       data: content,
       blockSyntaxes: customBlockSyntaxes,
       inlineSyntaxes: md.ExtensionSet.gitHubFlavored.inlineSyntaxes,
-      extensionSet: md.ExtensionSet.gitHubFlavored,
-
+      // 不设置 extensionSet，避免与自定义 blockSyntaxes 冲突
       selectable: false,
+
       softLineBreak: true,
       styleSheet: MarkdownStyleSheet(
 
