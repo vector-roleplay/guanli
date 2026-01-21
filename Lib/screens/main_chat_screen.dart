@@ -191,8 +191,10 @@ class _MainChatScreenState extends State<MainChatScreen> {
     final conversation = await ConversationService.instance.create();
     setState(() {
       _currentConversation = conversation;
+      _showingPrimary = true;  // 重置视口状态
     });
   }
+
 
   void _switchConversation(Conversation conversation) {
     setState(() {
@@ -984,11 +986,14 @@ class _MainChatScreenState extends State<MainChatScreen> {
           _currentConversation?.messages.clear();
           await ConversationService.instance.update(_currentConversation!);
           Navigator.pop(ctx);
-          setState(() {});
+          setState(() {
+            _showingPrimary = true;  // 重置视口状态
+          });
         }, child: const Text('确定')),
       ],
     ));
   }
+
 
 
   void _deleteConversation(Conversation conversation) {
