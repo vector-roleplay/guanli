@@ -506,25 +506,38 @@ class _FullscreenEditorScreen extends StatefulWidget {
 class _FullscreenEditorScreenState extends State<_FullscreenEditorScreen> {
   late TextEditingController _controller;
   bool _hasChanges = false;
+  int _charCount = 0;
 
   @override
   void initState() {
     super.initState();
     _controller = TextEditingController(text: widget.initialContent);
-    _controller.addListener(() {
-      if (!_hasChanges && _controller.text != widget.initialContent) {
-        setState(() => _hasChanges = true);
-      }
-    });
+    _charCount = widget.initialContent.length;
+    _controller.addListener(_onTextChanged);
   }
+
+  void _onTextChanged() {
+    final newHasChanges = _controller.text != widget.initialContent;
+    final newCharCount = _controller.text.length;
+    
+    if (newHasChanges != _hasChanges || newCharCount != _charCount) {
+      setState(() {
+        _hasChanges = newHasChanges;
+        _charCount = newCharCount;
+      });
+    }
+  }
+
 
   @override
   void dispose() {
+    _controller.removeListener(_onTextChanged);
     _controller.dispose();
     super.dispose();
   }
 
   Future<bool> _onWillPop() async {
+
     if (!_hasChanges) return true;
     
     final result = await showDialog<bool>(
@@ -626,9 +639,10 @@ class _FullscreenEditorScreenState extends State<_FullscreenEditorScreen> {
               Icon(Icons.info_outline, size: 16, color: colorScheme.outline),
               const SizedBox(width: 8),
               Text(
-                '字数: ${_controller.text.length}',
+                '字数: $_charCount',
                 style: TextStyle(fontSize: 12, color: colorScheme.outline),
               ),
+
               const Spacer(),
               if (_hasChanges)
                 Container(
