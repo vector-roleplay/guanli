@@ -544,9 +544,10 @@ class _SubChatScreenState extends State<SubChatScreen> {
     _subConversation.messages.add(systemMessage);
     await SubConversationService.instance.update(_subConversation);
     setState(() {});
-    _scrollToBottom();
+    _scrollToBottomAfterRender();  // ✅ 改用带递归重试的方法
     await _requestAIResponse();
   }
+
 
   void _stopGeneration() {
     _stopRequested = true;
