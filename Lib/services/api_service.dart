@@ -306,6 +306,17 @@ class ApiService {
       // 优先使用真实数据，否则降级使用估算值
       final hasRealUsage = realPromptTokens != null && realCompletionTokens != null;
       
+      // 记录成功的API配置
+      if (outputContent.isNotEmpty) {
+        // 判断是主界面还是子界面API
+        final config = AppConfig.instance;
+        if (apiUrl == config.mainApiUrl && apiKey == config.mainApiKey) {
+          config.recordMainApiSuccess();
+        } else if (apiUrl == config.subApiUrl && apiKey == config.subApiKey) {
+          config.recordSubApiSuccess();
+        }
+      }
+      
       return StreamResult(
         content: outputContent,
         promptTokens: realPromptTokens ?? fallbackPromptTokens,
@@ -313,6 +324,7 @@ class ApiService {
         isRealUsage: hasRealUsage,
       );
     } finally {
+
       _activeClient?.close();
       _activeClient = null;
     }
