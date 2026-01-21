@@ -263,17 +263,52 @@ class _DatabaseScreenState extends State<DatabaseScreen> {
   Future<void> _importGitHubDirectory(String repo, String path) async {
     setState(() => _isLoading = true);
     try {
-      final files = await GitHubService.instance.getDirectoryContents(repo, path);
-      for (var entry in files.entries) {
-        await DatabaseService.instance.importGitHubFile(entry.key, entry.value);
+      // 使用 Zipball 方式下载（更快）
+      final result = await GitHubService.instance.downloadRepoZip(
+        repo,
+        subPath: path.isNotEmpty ? path : null,
+      );
+      
+      if (result.error != null) {
+        throw Exception(result.error);
       }
+      
+      final files = result.files;
+      if (files.isEmpty) {
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('没有找到文件')));
+        setState(() => _isLoading = false);
+        return;
+      }
+      
+      // 统计
+      int textCount = 0;
+      int binaryCount = 0;
+      
+      // 批量导入文件
+      for (var entry in files.entries) {
+        if (entry.value != null) {
+          await DatabaseService.instance.importGitHubFile(entry.key, entry.value!);
+          textCount++;
+        } else {
+          // 二进制文件也记录路径（content 为空字符串）
+          await DatabaseService.instance.importGitHubFile(entry.key, '');
+          binaryCount++;
+        }
+      }
+      
       await _loadData();
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('已导入 ${files.length} 个文件')));
+      
+      String msg = '已导入 $textCount 个文本文件';
+      if (binaryCount > 0) {
+        msg += '，$binaryCount 个二进制文件（仅路径）';
+      }
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
     } catch (e) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('导入失败: $e')));
     }
     setState(() => _isLoading = false);
   }
+
 
   @override
   Widget build(BuildContext context) {
