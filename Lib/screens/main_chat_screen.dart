@@ -36,10 +36,19 @@ class _MainChatScreenState extends State<MainChatScreen> {
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
   final MessageDetector _detector = MessageDetector();
   
-  // scrollable_positioned_list 控制器
+  // 主视口控制器
   final ItemScrollController _itemScrollController = ItemScrollController();
   final ItemPositionsListener _itemPositionsListener = ItemPositionsListener.create();
   final ScrollOffsetController _scrollOffsetController = ScrollOffsetController();
+  
+  // 备用视口控制器（用于无缝切换）
+  final ItemScrollController _altScrollController = ItemScrollController();
+  final ItemPositionsListener _altPositionsListener = ItemPositionsListener.create();
+  final ScrollOffsetController _altScrollOffsetController = ScrollOffsetController();
+  
+  // 当前显示主视口还是备用视口
+  bool _showingPrimary = true;
+
 
   
   String _directoryTree = '';
@@ -207,13 +216,41 @@ class _MainChatScreenState extends State<MainChatScreen> {
 
 
   void _forceScrollToBottom() {
-    // 直接跳到列表物理底部
     if (_currentConversation == null || _currentConversation!.messages.isEmpty) return;
-    if (!_itemScrollController.isAttached) return;
     
-    setState(() => _isNearBottom = true);
-    _itemScrollController.scrollToEnd();
+    // 获取当前隐藏的备用视口控制器
+    final altController = _showingPrimary ? _altScrollController : _itemScrollController;
+    
+    if (!altController.isAttached) {
+      // 备用视口未就绪，使用普通方式
+      final currentController = _showingPrimary ? _itemScrollController : _altScrollController;
+      if (currentController.isAttached) {
+        currentController.scrollToEnd();
+      }
+      setState(() => _isNearBottom = true);
+      return;
+    }
+    
+    // 在备用视口中跳转到底部
+    altController.jumpTo(index: _currentConversation!.messages.length - 1);
+    
+    // 等待渲染完成
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!altController.isAttached) return;
+      altController.scrollToEnd();
+      
+      // 再等一帧确保完全渲染
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        // 切换显示
+        setState(() {
+          _showingPrimary = !_showingPrimary;
+          _isNearBottom = true;
+        });
+      });
+    });
   }
+
 
 
   void _scrollToTop() {
@@ -266,7 +303,48 @@ class _MainChatScreenState extends State<MainChatScreen> {
       curve: Curves.easeOut,
       alignment: 0.0,
     );
+  }// 构建消息列表（复用代码）
+  Widget _buildMessageList({
+    required ItemScrollController controller,
+    required ItemPositionsListener positionsListener,
+    required ScrollOffsetController offsetController,
+  }) {
+    return ScrollablePositionedList.builder(
+      itemScrollController: controller,
+      itemPositionsListener: positionsListener,
+      scrollOffsetController: offsetController,
+      padding: const EdgeInsets.symmetric(vertical: 16),
+      itemCount: _currentConversation!.messages.length,
+      itemBuilder: (context, index) {
+        final message = _currentConversation!.messages[index];
+        
+        if (message.id == _streamingMessageId) {
+          return ValueListenableBuilder<String>(
+            valueListenable: _streamingContent,
+            builder: (context, content, _) {
+              final streamingMsg = Message(
+                id: message.id,
+                role: MessageRole.assistant,
+                content: content,
+                timestamp: message.timestamp,
+                status: MessageStatus.sending,
+              );
+              return MessageBubble(message: streamingMsg);
+            },
+          );
+        }
+        
+        return MessageBubble(
+          message: message,
+          onRetry: message.status == MessageStatus.error ? () => _sendMessage(message.content, message.attachments) : null,
+          onDelete: () => _deleteMessage(index),
+          onRegenerate: message.role == MessageRole.assistant && message.status == MessageStatus.sent ? () => _regenerateMessage(index) : null,
+          onEdit: message.role == MessageRole.user && message.status == MessageStatus.sent ? () => _editMessage(index) : null,
+        );
+      },
+    );
   }
+
 
 
 
@@ -962,56 +1040,44 @@ class _MainChatScreenState extends State<MainChatScreen> {
                         opacity: _isListReady ? 1.0 : 0.0,
                         child: NotificationListener<ScrollNotification>(
                           onNotification: _handleScrollNotification,
-                          child: ScrollablePositionedList.builder(
-
-                          // 正常列表，旧消息在上，新消息在下
-                          itemScrollController: _itemScrollController,
-                          itemPositionsListener: _itemPositionsListener,
-                          scrollOffsetController: _scrollOffsetController,
-                          padding: const EdgeInsets.symmetric(vertical: 16),
-                          // 不设置 initialScrollIndex，完全依赖 _scrollToBottomAfterRender() 定位
-                          itemCount: _currentConversation!.messages.length,
-
-
-                          itemBuilder: (context, index) {
-                            // 正常列表，index 直接对应消息索引
-                            final message = _currentConversation!.messages[index];
-
-                            
-                            // 如果是正在流式生成的消息，使用 ValueListenableBuilder 局部更新
-                            if (message.id == _streamingMessageId) {
-                              return ValueListenableBuilder<String>(
-                                valueListenable: _streamingContent,
-                                builder: (context, content, _) {
-                                  final streamingMsg = Message(
-                                    id: message.id,
-                                    role: MessageRole.assistant,
-                                    content: content,
-                                    timestamp: message.timestamp,
-                                    status: MessageStatus.sending,
-                                  );
-                                  return MessageBubble(message: streamingMsg);
-                                },
-                              );
-                            }
-                            
-                            return MessageBubble(
-                              message: message,
-                              onRetry: message.status == MessageStatus.error ? () => _sendMessage(message.content, message.attachments) : null,
-                              onDelete: () => _deleteMessage(index),
-                              onRegenerate: message.role == MessageRole.assistant && message.status == MessageStatus.sent ? () => _regenerateMessage(index) : null,
-                              onEdit: message.role == MessageRole.user && message.status == MessageStatus.sent ? () => _editMessage(index) : null,
-                            );
-
-                          },
+                          child: Stack(
+                            children: [
+                              // 主视口
+                              if (_showingPrimary)
+                                _buildMessageList(
+                                  controller: _itemScrollController,
+                                  positionsListener: _itemPositionsListener,
+                                  offsetController: _scrollOffsetController,
+                                ),
+                              // 备用视口（屏幕外）
+                              if (!_showingPrimary)
+                                _buildMessageList(
+                                  controller: _altScrollController,
+                                  positionsListener: _altPositionsListener,
+                                  offsetController: _altScrollOffsetController,
+                                ),
+                              // 隐藏的备用视口（用于预渲染）
+                              Offstage(
+                                offstage: true,
+                                child: _showingPrimary
+                                    ? _buildMessageList(
+                                        controller: _altScrollController,
+                                        positionsListener: _altPositionsListener,
+                                        offsetController: _altScrollOffsetController,
+                                      )
+                                    : _buildMessageList(
+                                        controller: _itemScrollController,
+                                        positionsListener: _itemPositionsListener,
+                                        offsetController: _scrollOffsetController,
+                                      ),
+                              ),
+                            ],
+                          ),
                         ),
                       ),
-                    ),
-
-
-
               ),
               ChatInput(onSend: _sendMessage, enabled: !_isLoading, isGenerating: _isLoading, onStop: _stopGeneration),
+
 
 
             ],
