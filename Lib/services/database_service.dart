@@ -8,7 +8,14 @@ class DatabaseService {
   static final DatabaseService instance = DatabaseService._internal();
   DatabaseService._internal();
 
+  // 全局数据库（用于没有指定会话时）
   Database? _database;
+  
+  // 会话专属数据库缓存
+  final Map<String, Database> _conversationDatabases = {};
+  
+  // 当前活跃的会话ID
+  String? _currentConversationId;
 
   Future<void> init() async {
     final dbPath = await getDatabasesPath();
@@ -18,33 +25,140 @@ class DatabaseService {
       path,
       version: 1,
       onCreate: (db, version) async {
-        await db.execute('''
-          CREATE TABLE files (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL,
-            path TEXT NOT NULL UNIQUE,
-            parent_path TEXT,
-            is_directory INTEGER DEFAULT 0,
-            size INTEGER DEFAULT 0,
-            content TEXT,
-            mime_type TEXT,
-            created_at TEXT,
-            updated_at TEXT
-          )
-        ''');
-
-        await db.execute('CREATE INDEX idx_files_path ON files(path)');
-        await db.execute('CREATE INDEX idx_files_parent ON files(parent_path)');
-        await db.execute('CREATE INDEX idx_files_name ON files(name)');
+        await _createTables(db);
       },
     );
   }
 
+  /// 创建数据库表
+  Future<void> _createTables(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS files (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        path TEXT NOT NULL UNIQUE,
+        parent_path TEXT,
+        is_directory INTEGER DEFAULT 0,
+        size INTEGER DEFAULT 0,
+        content TEXT,
+        mime_type TEXT,
+        created_at TEXT,
+        updated_at TEXT
+      )
+    ''');
+
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_files_path ON files(path)');
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_files_parent ON files(parent_path)');
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_files_name ON files(name)');
+  }
+
+  /// 设置当前会话ID
+  Future<void> setCurrentConversation(String? conversationId) async {
+    _currentConversationId = conversationId;
+    if (conversationId != null) {
+      await _getConversationDatabase(conversationId);
+    }
+  }
+
+  /// 获取会话专属数据库
+  Future<Database> _getConversationDatabase(String conversationId) async {
+    if (_conversationDatabases.containsKey(conversationId)) {
+      return _conversationDatabases[conversationId]!;
+    }
+
+    final dbPath = await getDatabasesPath();
+    final convDbDir = join(dbPath, 'conversations');
+    
+    // 确保目录存在
+    final dir = Directory(convDbDir);
+    if (!await dir.exists()) {
+      await dir.create(recursive: true);
+    }
+    
+    final path = join(convDbDir, 'conv_$conversationId.db');
+
+    final db = await openDatabase(
+      path,
+      version: 1,
+      onCreate: (db, version) async {
+        await _createTables(db);
+      },
+    );
+
+    _conversationDatabases[conversationId] = db;
+    return db;
+  }
+
+  /// 获取当前活跃的数据库
   Database get db {
+    if (_currentConversationId != null && _conversationDatabases.containsKey(_currentConversationId)) {
+      return _conversationDatabases[_currentConversationId]!;
+    }
     if (_database == null) {
       throw Exception('Database not initialized');
     }
     return _database!;
+  }
+
+  /// 获取指定会话的数据库（如果存在）
+  Future<Database> getDbForConversation(String? conversationId) async {
+    if (conversationId == null) {
+      return _database!;
+    }
+    return await _getConversationDatabase(conversationId);
+  }
+
+  /// 删除会话数据库
+  Future<void> deleteConversationDatabase(String conversationId) async {
+    // 关闭数据库连接
+    if (_conversationDatabases.containsKey(conversationId)) {
+      await _conversationDatabases[conversationId]!.close();
+      _conversationDatabases.remove(conversationId);
+    }
+    
+    // 删除数据库文件
+    final dbPath = await getDatabasesPath();
+    final path = join(dbPath, 'conversations', 'conv_$conversationId.db');
+    final file = File(path);
+    if (await file.exists()) {
+      await file.delete();
+    }
+  }
+
+  /// 复制全局数据库到会话数据库
+  Future<void> copyGlobalToConversation(String conversationId) async {
+    if (_database == null) return;
+    
+    final convDb = await _getConversationDatabase(conversationId);
+    
+    // 获取全局数据库中的所有文件
+    final files = await _database!.query('files');
+    
+    // 复制到会话数据库
+    for (var file in files) {
+      await convDb.insert(
+        'files',
+        Map<String, dynamic>.from(file)..remove('id'),
+        conflictAlgorithm: ConflictAlgorithm.replace,
+      );
+    }
+  }
+
+  /// 检查会话是否有独立数据库
+  Future<bool> hasConversationDatabase(String conversationId) async {
+    final dbPath = await getDatabasesPath();
+    final path = join(dbPath, 'conversations', 'conv_$conversationId.db');
+    return File(path).exists();
+  }
+
+  /// 获取会话数据库的文件数量
+  Future<int> getConversationFileCount(String conversationId) async {
+    final hasDb = await hasConversationDatabase(conversationId);
+    if (!hasDb) return 0;
+    
+    final convDb = await _getConversationDatabase(conversationId);
+    final result = await convDb.rawQuery('SELECT COUNT(*) as count FROM files WHERE is_directory = 0');
+    return Sqflite.firstIntValue(result) ?? 0;
   }
 
   // 导入文件夹
@@ -240,7 +354,9 @@ class DatabaseService {
 
   Future<void> deleteFile(String path) async {
     await db.delete('files', where: 'path = ? OR parent_path LIKE ?', whereArgs: [path, '$path%']);
-  }// 获取所有文件内容（用于一键发送）
+  }
+
+  // 获取所有文件内容（用于一键发送）
   Future<List<Map<String, dynamic>>> getAllFilesWithContent() async {
     return await db.query(
       'files',
