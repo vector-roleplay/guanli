@@ -76,7 +76,28 @@ class _SubChatScreenState extends State<SubChatScreen> {
         _initializeChat();
       });
     }
+    
+    // 恢复会话时，等渲染完滚动到底部
+    if (widget.isResuming && _subConversation.messages.isNotEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _scrollToBottomAfterRender();
+      });
+    }
   }
+
+  void _scrollToBottomAfterRender() {
+    if (_subConversation.messages.isEmpty) return;
+    if (!_itemScrollController.isAttached) return;
+    
+    // 第一步：跳到最后一条消息让它渲染
+    _itemScrollController.jumpTo(index: _subConversation.messages.length - 1);
+    
+    // 第二步：等渲染完再跳到物理底部
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _itemScrollController.scrollToEnd();
+    });
+  }
+
 
   void _onPositionsChange() {
     final positions = _itemPositionsListener.itemPositions.value;
@@ -660,9 +681,10 @@ class _SubChatScreenState extends State<SubChatScreen> {
                           itemPositionsListener: _itemPositionsListener,
                           scrollOffsetController: _scrollOffsetController,
                           padding: const EdgeInsets.symmetric(vertical: 16),
-                          // 初始显示底部（最新消息）
+                          // 初始定位到最后一条消息
                           initialScrollIndex: _subConversation.messages.length - 1,
-                          initialAlignment: 1.0,  // 对齐到视口底部
+                          initialAlignment: 0.0,
+
 
                           itemCount: _subConversation.messages.length,
 
