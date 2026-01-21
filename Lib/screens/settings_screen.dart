@@ -153,9 +153,174 @@ class _SettingsScreenState extends State<SettingsScreen> {
     return '$level级';
   }
 
+  /// 显示API历史记录选择器
+  void _showApiHistoryPicker({required bool isMain}) {
+    final config = AppConfig.instance;
+    final history = isMain ? config.mainApiHistory : config.subApiHistory;
+    
+    if (history.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('暂无历史记录，成功调用API后会自动保存')),
+      );
+      return;
+    }
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      builder: (ctx) => DraggableScrollableSheet(
+        initialChildSize: 0.5,
+        minChildSize: 0.3,
+        maxChildSize: 0.8,
+        expand: false,
+        builder: (ctx, scrollController) {
+          final colorScheme = Theme.of(ctx).colorScheme;
+          return Column(
+            children: [
+              Padding(
+                padding: const EdgeInsets.all(16),
+                child: Row(
+                  children: [
+                    Icon(Icons.history, color: colorScheme.primary),
+                    const SizedBox(width: 8),
+                    Text(
+                      '${isMain ? '主界面' : '子界面'} API 历史 (${history.length})',
+                      style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                    ),
+                  ],
+                ),
+              ),
+              const Divider(height: 1),
+              Expanded(
+                child: ListView.builder(
+                  controller: scrollController,
+                  itemCount: history.length,
+                  itemBuilder: (ctx, index) {
+                    final item = history[index];
+                    final isCurrentlyUsed = isMain
+                        ? (item.url == _mainApiUrlController.text && item.key == _mainApiKeyController.text)
+                        : (item.url == _subApiUrlController.text && item.key == _subApiKeyController.text);
+                    
+                    return ListTile(
+                      leading: CircleAvatar(
+                        backgroundColor: isCurrentlyUsed ? colorScheme.primary : colorScheme.surfaceContainerHighest,
+                        child: Icon(
+                          Icons.api,
+                          color: isCurrentlyUsed ? colorScheme.onPrimary : colorScheme.onSurfaceVariant,
+                          size: 20,
+                        ),
+                      ),
+                      title: Text(
+                        item.model,
+                        style: TextStyle(
+                          fontWeight: isCurrentlyUsed ? FontWeight.bold : FontWeight.normal,
+                        ),
+                      ),
+                      subtitle: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            item.url,
+                            style: TextStyle(fontSize: 11, color: colorScheme.outline),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          Text(
+                            '密钥: ${_maskApiKey(item.key)}',
+                            style: TextStyle(fontSize: 11, color: colorScheme.outline),
+                          ),
+                        ],
+                      ),
+                      trailing: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          if (isCurrentlyUsed)
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: colorScheme.primaryContainer,
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              child: Text(
+                                '当前',
+                                style: TextStyle(fontSize: 10, color: colorScheme.onPrimaryContainer),
+                              ),
+                            ),
+                          IconButton(
+                            icon: Icon(Icons.delete_outline, size: 20, color: colorScheme.error),
+                            onPressed: () {
+                              if (isMain) {
+                                config.deleteMainApiHistory(item);
+                              } else {
+                                config.deleteSubApiHistory(item);
+                              }
+                              Navigator.pop(ctx);
+                              _showApiHistoryPicker(isMain: isMain);
+                            },
+                          ),
+                        ],
+                      ),
+                      onTap: () {
+                        if (isMain) {
+                          config.switchMainApi(item);
+                          _mainApiUrlController.text = item.url;
+                          _mainApiKeyController.text = item.key;
+                          _mainModelController.text = item.model;
+                        } else {
+                          config.switchSubApi(item);
+                          _subApiUrlController.text = item.url;
+                          _subApiKeyController.text = item.key;
+                          _subModelController.text = item.model;
+                        }
+                        Navigator.pop(ctx);
+                        setState(() {});
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(content: Text('已切换到: ${item.model}')),
+                        );
+                      },
+                    );
+                  },
+                ),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  /// 遮盖API密钥
+  String _maskApiKey(String key) {
+    if (key.length <= 8) return '****';
+    return '${key.substring(0, 4)}...${key.substring(key.length - 4)}';
+  }
+
+  /// 打开全屏编辑器
+  Future<void> _openFullscreenEditor({
+    required String title,
+    required String initialContent,
+    required Function(String) onSave,
+  }) async {
+    final result = await Navigator.push<String>(
+      context,
+      MaterialPageRoute(
+        builder: (context) => _FullscreenEditorScreen(
+          title: title,
+          initialContent: initialContent,
+        ),
+      ),
+    );
+    
+    if (result != null) {
+      onSave(result);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    final config = AppConfig.instance;
+    
     return Scaffold(
       appBar: AppBar(title: const Text('设置'), centerTitle: true, actions: [TextButton(onPressed: _saveSettings, child: const Text('保存'))]),
       body: SingleChildScrollView(
@@ -163,7 +328,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            // 主界面 API 设置
             _buildSection('主界面 API 设置', Icons.api, [
+              // API历史切换按钮
+              if (config.mainApiHistory.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: OutlinedButton.icon(
+                    onPressed: () => _showApiHistoryPicker(isMain: true),
+                    icon: const Icon(Icons.swap_horiz, size: 18),
+                    label: Text('切换API配置 (${config.mainApiHistory.length})'),
+                    style: OutlinedButton.styleFrom(
+                      minimumSize: const Size(double.infinity, 44),
+                    ),
+                  ),
+                ),
               _buildTextField(_mainApiUrlController, 'API地址', 'https://api.openai.com/v1'),
               const SizedBox(height: 12),
               _buildTextField(_mainApiKeyController, 'API密钥', 'sk-xxx', obscure: true),
@@ -174,10 +353,46 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ElevatedButton(onPressed: _loadingMainModels ? null : _fetchMainModels, child: _loadingMainModels ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)) : const Text('获取')),
               ]),
               const SizedBox(height: 12),
-              _buildTextField(_mainPromptController, '主界面提示词', '输入主界面的系统提示词...', maxLines: 4),
+              // 主界面提示词 - 带全屏按钮
+              Row(
+                children: [
+                  Expanded(
+                    child: Text('主界面提示词', style: TextStyle(fontSize: 12, color: colorScheme.outline)),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.fullscreen, size: 20),
+                    tooltip: '全屏编辑',
+                    onPressed: () => _openFullscreenEditor(
+                      title: '主界面提示词',
+                      initialContent: _mainPromptController.text,
+                      onSave: (content) {
+                        _mainPromptController.text = content;
+                        setState(() {});
+                      },
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 4),
+              _buildTextField(_mainPromptController, '', '输入主界面的系统提示词...', maxLines: 4, showLabel: false),
             ]),
             const SizedBox(height: 24),
+            
+            // 子界面 API 设置
             _buildSection('子界面 API 设置', Icons.api, [
+              // API历史切换按钮
+              if (config.subApiHistory.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: OutlinedButton.icon(
+                    onPressed: () => _showApiHistoryPicker(isMain: false),
+                    icon: const Icon(Icons.swap_horiz, size: 18),
+                    label: Text('切换API配置 (${config.subApiHistory.length})'),
+                    style: OutlinedButton.styleFrom(
+                      minimumSize: const Size(double.infinity, 44),
+                    ),
+                  ),
+                ),
               _buildTextField(_subApiUrlController, 'API地址', 'https://api.openai.com/v1'),
               const SizedBox(height: 12),
               _buildTextField(_subApiKeyController, 'API密钥', 'sk-xxx', obscure: true),
@@ -189,6 +404,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ]),
             ]),
             const SizedBox(height: 24),
+            
+            // 子界面提示词设置
             _buildSection('子界面提示词设置', Icons.layers, [
               SizedBox(
                 height: 50,
@@ -206,8 +423,39 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ),
               ),
               const SizedBox(height: 12),
-              if (_currentSubLevel > 0 && _currentSubLevel <= _subPromptControllers.length)
-                _buildTextField(_subPromptControllers[_currentSubLevel - 1], '${_getLevelName(_currentSubLevel)}子界面提示词', '输入${_getLevelName(_currentSubLevel)}子界面的系统提示词...', maxLines: 4),
+              if (_currentSubLevel > 0 && _currentSubLevel <= _subPromptControllers.length) ...[
+                // 子界面提示词 - 带全屏按钮
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        '${_getLevelName(_currentSubLevel)}子界面提示词',
+                        style: TextStyle(fontSize: 12, color: colorScheme.outline),
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.fullscreen, size: 20),
+                      tooltip: '全屏编辑',
+                      onPressed: () => _openFullscreenEditor(
+                        title: '${_getLevelName(_currentSubLevel)}子界面提示词',
+                        initialContent: _subPromptControllers[_currentSubLevel - 1].text,
+                        onSave: (content) {
+                          _subPromptControllers[_currentSubLevel - 1].text = content;
+                          setState(() {});
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                _buildTextField(
+                  _subPromptControllers[_currentSubLevel - 1],
+                  '',
+                  '输入${_getLevelName(_currentSubLevel)}子界面的系统提示词...',
+                  maxLines: 4,
+                  showLabel: false,
+                ),
+              ],
             ]),
           ],
         ),
@@ -226,7 +474,178 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
-  Widget _buildTextField(TextEditingController controller, String label, String hint, {bool obscure = false, int maxLines = 1}) {
-    return TextField(controller: controller, obscureText: obscure, maxLines: maxLines, decoration: InputDecoration(labelText: label, hintText: hint, border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)), contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14)));
+  Widget _buildTextField(TextEditingController controller, String label, String hint, {bool obscure = false, int maxLines = 1, bool showLabel = true}) {
+    return TextField(
+      controller: controller,
+      obscureText: obscure,
+      maxLines: maxLines,
+      decoration: InputDecoration(
+        labelText: showLabel && label.isNotEmpty ? label : null,
+        hintText: hint,
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+      ),
+    );
+  }
+}
+
+/// 全屏编辑器
+class _FullscreenEditorScreen extends StatefulWidget {
+  final String title;
+  final String initialContent;
+
+  const _FullscreenEditorScreen({
+    required this.title,
+    required this.initialContent,
+  });
+
+  @override
+  State<_FullscreenEditorScreen> createState() => _FullscreenEditorScreenState();
+}
+
+class _FullscreenEditorScreenState extends State<_FullscreenEditorScreen> {
+  late TextEditingController _controller;
+  bool _hasChanges = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(text: widget.initialContent);
+    _controller.addListener(() {
+      if (!_hasChanges && _controller.text != widget.initialContent) {
+        setState(() => _hasChanges = true);
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  Future<bool> _onWillPop() async {
+    if (!_hasChanges) return true;
+    
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('放弃更改？'),
+        content: const Text('您有未保存的更改，确定要放弃吗？'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('放弃'),
+          ),
+        ],
+      ),
+    );
+    
+    return result ?? false;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    
+    return PopScope(
+      canPop: !_hasChanges,
+      onPopInvokedWithResult: (didPop, result) async {
+        if (!didPop) {
+          final shouldPop = await _onWillPop();
+          if (shouldPop && context.mounted) {
+            Navigator.pop(context);
+          }
+        }
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          title: Text(widget.title),
+          centerTitle: true,
+          leading: IconButton(
+            icon: const Icon(Icons.close),
+            onPressed: () async {
+              if (_hasChanges) {
+                final shouldPop = await _onWillPop();
+                if (shouldPop && context.mounted) {
+                  Navigator.pop(context);
+                }
+              } else {
+                Navigator.pop(context);
+              }
+            },
+          ),
+          actions: [
+            TextButton.icon(
+              onPressed: () {
+                Navigator.pop(context, _controller.text);
+              },
+              icon: const Icon(Icons.check),
+              label: const Text('保存'),
+            ),
+          ],
+        ),
+        body: Padding(
+          padding: const EdgeInsets.all(16),
+          child: TextField(
+            controller: _controller,
+            maxLines: null,
+            expands: true,
+            textAlignVertical: TextAlignVertical.top,
+            decoration: InputDecoration(
+              hintText: '输入提示词内容...',
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: BorderSide(color: colorScheme.outline.withOpacity(0.3)),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: BorderSide(color: colorScheme.outline.withOpacity(0.3)),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: BorderSide(color: colorScheme.primary, width: 2),
+              ),
+              contentPadding: const EdgeInsets.all(16),
+            ),
+            style: const TextStyle(fontSize: 15, height: 1.6),
+          ),
+        ),
+        bottomNavigationBar: Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: colorScheme.surface,
+            border: Border(top: BorderSide(color: colorScheme.outline.withOpacity(0.2))),
+          ),
+          child: Row(
+            children: [
+              Icon(Icons.info_outline, size: 16, color: colorScheme.outline),
+              const SizedBox(width: 8),
+              Text(
+                '字数: ${_controller.text.length}',
+                style: TextStyle(fontSize: 12, color: colorScheme.outline),
+              ),
+              const Spacer(),
+              if (_hasChanges)
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: colorScheme.primaryContainer,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Text(
+                    '有未保存的更改',
+                    style: TextStyle(fontSize: 11, color: colorScheme.onPrimaryContainer),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 }
