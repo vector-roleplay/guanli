@@ -74,23 +74,26 @@ class _MainChatScreenState extends State<MainChatScreen> {
   void initState() {
     super.initState();
     _init();
+    // 监听两个视口的位置变化
     _itemPositionsListener.itemPositions.addListener(_onPositionsChange);
+    _altPositionsListener.itemPositions.addListener(_onPositionsChange);
   }
 
+
   void _onPositionsChange() {
-    final positions = _itemPositionsListener.itemPositions.value;
+    // 根据当前显示的视口选择监听器
+    final positionsListener = _showingPrimary ? _itemPositionsListener : _altPositionsListener;
+    final positions = positionsListener.itemPositions.value;
     if (positions.isEmpty || _currentConversation == null) return;
     
-    // 正常列表中，最大 index 是最新消息（在底部）
     final maxIndex = _currentConversation!.messages.length - 1;
     final isBottomVisible = positions.any((pos) => pos.index == maxIndex);
-
     
     if (isBottomVisible != _isNearBottom) {
       setState(() => _isNearBottom = isBottomVisible);
     }
-    // 不再在这里控制按钮显示，改由滚动通知控制
   }
+
 
   // 处理滚动通知，只在用户手动滑动时显示按钮
   bool _handleScrollNotification(ScrollNotification notification) {
@@ -167,9 +170,11 @@ class _MainChatScreenState extends State<MainChatScreen> {
   void dispose() {
     _hideButtonsTimer?.cancel();
     _itemPositionsListener.itemPositions.removeListener(_onPositionsChange);
+    _altPositionsListener.itemPositions.removeListener(_onPositionsChange);
     _streamingContent.dispose();
     super.dispose();
   }
+
 
 
   Future<void> _loadDirectoryTree() async {
@@ -202,16 +207,18 @@ class _MainChatScreenState extends State<MainChatScreen> {
   // 正常列表：index 0 = 最旧消息（顶部），index max = 最新消息（底部）
   
   void _scrollToBottom() {
-    // 直接跳到列表物理底部
     if (_currentConversation == null || _currentConversation!.messages.isEmpty) return;
-    if (!_itemScrollController.isAttached) return;
     
-    _itemScrollController.scrollToEnd();
+    final controller = _showingPrimary ? _itemScrollController : _altScrollController;
+    if (!controller.isAttached) return;
+    
+    controller.scrollToEnd();
     // 确保列表可见（用于发送消息后的滚动）
     if (!_isListReady && mounted) {
       setState(() => _isListReady = true);
     }
   }
+
 
 
 
@@ -254,12 +261,14 @@ class _MainChatScreenState extends State<MainChatScreen> {
 
 
   void _scrollToTop() {
-    // 直接跳到列表物理顶部
     if (_currentConversation == null || _currentConversation!.messages.isEmpty) return;
-    if (!_itemScrollController.isAttached) return;
     
-    _itemScrollController.scrollToStart();
+    final controller = _showingPrimary ? _itemScrollController : _altScrollController;
+    if (!controller.isAttached) return;
+    
+    controller.scrollToStart();
   }
+
 
 
 
@@ -268,17 +277,20 @@ class _MainChatScreenState extends State<MainChatScreen> {
 
 
   void _scrollToPreviousMessage() {
-    // 正常列表：看更旧的消息 = 减小 index
     if (_currentConversation == null || _currentConversation!.messages.isEmpty) return;
-    if (!_itemScrollController.isAttached) return;
     
-    final positions = _itemPositionsListener.itemPositions.value;
+    final controller = _showingPrimary ? _itemScrollController : _altScrollController;
+    final positionsListener = _showingPrimary ? _itemPositionsListener : _altPositionsListener;
+    
+    if (!controller.isAttached) return;
+    
+    final positions = positionsListener.itemPositions.value;
     if (positions.isEmpty) return;
     
     final minVisible = positions.reduce((a, b) => a.index < b.index ? a : b);
     final targetIndex = (minVisible.index - 1).clamp(0, _currentConversation!.messages.length - 1);
     
-    _itemScrollController.scrollTo(
+    controller.scrollTo(
       index: targetIndex,
       duration: const Duration(milliseconds: 300),
       curve: Curves.easeOut,
@@ -286,24 +298,31 @@ class _MainChatScreenState extends State<MainChatScreen> {
     );
   }
 
+
   void _scrollToNextMessage() {
-    // 正常列表：看更新的消息 = 增加 index
     if (_currentConversation == null || _currentConversation!.messages.isEmpty) return;
-    if (!_itemScrollController.isAttached) return;
     
-    final positions = _itemPositionsListener.itemPositions.value;
+    final controller = _showingPrimary ? _itemScrollController : _altScrollController;
+    final positionsListener = _showingPrimary ? _itemPositionsListener : _altPositionsListener;
+    
+    if (!controller.isAttached) return;
+    
+    final positions = positionsListener.itemPositions.value;
     if (positions.isEmpty) return;
     
     final maxVisible = positions.reduce((a, b) => a.index > b.index ? a : b);
     final targetIndex = (maxVisible.index + 1).clamp(0, _currentConversation!.messages.length - 1);
     
-    _itemScrollController.scrollTo(
+    controller.scrollTo(
       index: targetIndex,
       duration: const Duration(milliseconds: 300),
       curve: Curves.easeOut,
       alignment: 0.0,
     );
-  }// 构建消息列表（复用代码）
+  }
+
+  // 构建消息列表（复用代码）
+
   Widget _buildMessageList({
     required ItemScrollController controller,
     required ItemPositionsListener positionsListener,
