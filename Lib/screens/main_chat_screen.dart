@@ -949,8 +949,11 @@ class _MainChatScreenState extends State<MainChatScreen> {
     final requestedLevel = _detector.detectSubLevelRequest(response);
     if (requestedLevel == 1 && _currentConversation != null) {
       final paths = _detector.extractPaths(response);
+      // 传递给子界面时去除思维链
+      final cleanResponse = MessageDetector.removeThinkingContent(response);
       final subConv = await SubConversationService.instance.create(parentId: _currentConversation!.id, rootConversationId: _currentConversation!.id, level: 1);
-      final result = await Navigator.push<Map<String, dynamic>>(context, MaterialPageRoute(builder: (context) => SubChatScreen(subConversation: subConv, initialMessage: response, requestedPaths: paths, directoryTree: _directoryTree)));
+      final result = await Navigator.push<Map<String, dynamic>>(context, MaterialPageRoute(builder: (context) => SubChatScreen(subConversation: subConv, initialMessage: cleanResponse, requestedPaths: paths, directoryTree: _directoryTree)));
+
       if (result != null && result['message'] != null && result['message'].isNotEmpty) {
         final returnMessage = result['message'] as String;
         final infoMessage = Message(role: MessageRole.user, content: '【来自子界面的提取结果】\n$returnMessage', status: MessageStatus.sent);
