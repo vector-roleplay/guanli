@@ -183,9 +183,14 @@ class _MainChatScreenState extends State<MainChatScreen> {
 
 
   Future<void> _loadDirectoryTree() async {
+    // 设置当前会话的数据库
+    if (_currentConversation != null) {
+      await DatabaseService.instance.setCurrentConversation(_currentConversation!.id);
+    }
     final tree = await DatabaseService.instance.getDirectoryTree();
     setState(() => _directoryTree = tree);
   }
+
 
   Future<void> _createNewConversation() async {
     final conversation = await ConversationService.instance.create();
@@ -203,11 +208,13 @@ class _MainChatScreenState extends State<MainChatScreen> {
       _showingPrimary = true;  // 重置视口状态
     });
     Navigator.pop(context);
-    // 切换会话后滚动到底部
+    // 切换会话后加载该会话的数据库和滚动到底部
+    _loadDirectoryTree();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _scrollToBottomAfterRender();
     });
   }
+
 
 
 
@@ -1003,12 +1010,15 @@ class _MainChatScreenState extends State<MainChatScreen> {
 
   void _deleteConversation(Conversation conversation) {
     showDialog(context: context, builder: (ctx) => AlertDialog(
-      title: const Text('删除会话'), content: Text('确定要删除「${conversation.title}」吗？'),
+      title: const Text('删除会话'), content: Text('确定要删除「${conversation.title}」吗？\n\n注意：该会话的独立数据库也将被删除'),
       actions: [
         TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
         TextButton(onPressed: () async {
+          // 删除会话专属数据库
+          await DatabaseService.instance.deleteConversationDatabase(conversation.id);
           await SubConversationService.instance.deleteByRootId(conversation.id);
           await ConversationService.instance.delete(conversation.id);
+
           Navigator.pop(ctx);
           if (_currentConversation?.id == conversation.id) {
             if (ConversationService.instance.conversations.isNotEmpty) {
@@ -1060,10 +1070,26 @@ class _MainChatScreenState extends State<MainChatScreen> {
         title: Text(_currentConversation?.title ?? 'AI 对话'),
         centerTitle: true,
         actions: [
-          IconButton(onPressed: () async { await Navigator.push(context, MaterialPageRoute(builder: (context) => const DatabaseScreen())); _loadDirectoryTree(); }, icon: const Icon(Icons.folder_outlined), tooltip: '文件数据库'),
+          IconButton(
+            onPressed: () async {
+              await Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => DatabaseScreen(
+                    conversationId: _currentConversation?.id,
+                    conversationTitle: _currentConversation?.title,
+                  ),
+                ),
+              );
+              _loadDirectoryTree();
+            },
+            icon: const Icon(Icons.folder_outlined),
+            tooltip: '文件数据库',
+          ),
           IconButton(onPressed: _sendAllFiles, icon: const Icon(Icons.upload_file), tooltip: '发送所有文件'),
           IconButton(onPressed: _clearCurrentChat, icon: const Icon(Icons.delete_outline), tooltip: '清空对话'),
         ],
+
       ),
       drawer: _buildDrawer(context),
       body: Stack(
