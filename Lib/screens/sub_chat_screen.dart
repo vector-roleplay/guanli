@@ -84,19 +84,45 @@ class _SubChatScreenState extends State<SubChatScreen> {
     _itemPositionsListener.itemPositions.addListener(_onPositionsChange);
     _altPositionsListener.itemPositions.addListener(_onPositionsChange);
     
-    if (!widget.isResuming && widget.requestedPaths.isNotEmpty) {
+    // 统一初始化入口
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _init();
+    });
+  }
 
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        _initializeChat();
-      });
-    }
-    
-    // 恢复会话时，等渲染完滚动到底部
-    if (widget.isResuming && _subConversation.messages.isNotEmpty) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
+  /// 统一初始化方法（和主界面逻辑一致）
+  Future<void> _init() async {
+    if (widget.isResuming) {
+      // 恢复会话：直接显示已有消息
+      if (_subConversation.messages.isNotEmpty) {
         _scrollToBottomAfterRender();
-      });
+      } else {
+        // 恢复但没有消息，直接显示列表
+        if (mounted) setState(() => _isListReady = true);
+      }
+    } else {
+      // 新建会话：初始化聊天
+      if (widget.requestedPaths.isNotEmpty) {
+        await _initializeChat();
+      } else if (widget.initialMessage.isNotEmpty) {
+        // 有初始消息但没有路径，发送不带文件的消息
+        await _sendInitialMessageWithoutFiles();
+      } else {
+        // 既没有路径也没有初始消息，直接显示空列表
+        if (mounted) setState(() => _isListReady = true);
+      }
     }
+  }
+
+  /// 发送初始消息（不带文件）
+  Future<void> _sendInitialMessageWithoutFiles() async {
+    // 去除思维链
+    final cleanMessage = MessageDetector.removeThinkingContent(widget.initialMessage);
+    
+    String displayContent = '【申请${_subConversation.levelName}子界面】\n$cleanMessage';
+    String fullContent = '【申请${_subConversation.levelName}子界面】\n$cleanMessage\n\n【文件目录】\n${widget.directoryTree}\n\n【注意】未找到请求的文件';
+
+    await _sendSystemMessage(displayContent: displayContent, fullContent: fullContent, embeddedFiles: []);
   }
 
   void _scrollToBottomAfterRender() {
@@ -352,7 +378,9 @@ class _SubChatScreenState extends State<SubChatScreen> {
 
 
   Future<void> _initializeChat() async {
-    await _sendFilesWithMessage(widget.initialMessage, widget.requestedPaths);
+    // 去除思维链
+    final cleanMessage = MessageDetector.removeThinkingContent(widget.initialMessage);
+    await _sendFilesWithMessage(cleanMessage, widget.requestedPaths);
   }
 
   Future<void> _sendFilesWithMessage(String message, List<String> paths) async {
@@ -639,7 +667,9 @@ class _SubChatScreenState extends State<SubChatScreen> {
   Future<void> _handleAIResponse(String response) async {
     final returnLevel = _detector.detectReturnRequest(response);
     if (returnLevel == _subConversation.level) {
-      if (mounted) Navigator.pop(context, {'message': response});
+      // 返回时去除思维链
+      final cleanResponse = MessageDetector.removeThinkingContent(response);
+      if (mounted) Navigator.pop(context, {'message': cleanResponse});
       return;
     }
     final requestedLevel = _detector.detectSubLevelRequest(response);
@@ -656,12 +686,15 @@ class _SubChatScreenState extends State<SubChatScreen> {
       level: _subConversation.level + 1,
     );
 
+    // 传递给下一级时去除思维链
+    final cleanMessage = MessageDetector.removeThinkingContent(message);
+
     final result = await Navigator.push<Map<String, dynamic>>(
       context,
       MaterialPageRoute(
         builder: (context) => SubChatScreen(
           subConversation: nextSubConv,
-          initialMessage: message,
+          initialMessage: cleanMessage,
           requestedPaths: paths,
           directoryTree: widget.directoryTree,
         ),
@@ -675,6 +708,7 @@ class _SubChatScreenState extends State<SubChatScreen> {
   }
 
   Future<void> _handleReturnFromChild(String message) async {
+    // 返回的消息已经在子界面去除了思维链
     final returnMessage = Message(role: MessageRole.assistant, content: message, status: MessageStatus.sent);
     _subConversation.messages.add(returnMessage);
     await SubConversationService.instance.update(_subConversation);
@@ -798,8 +832,8 @@ class _SubChatScreenState extends State<SubChatScreen> {
                 child: !hasMessages
                     ? Center(
                         child: widget.isResuming
-                            ? Column(mainAxisAlignment: MainAxisAlignment.center, children: [Icon(Icons.history, size: 48, color: colorScheme.outline), const SizedBox(height: 16), Text('会话已恢复', style: TextStyle(color: colorScheme.outline))])
-                            : const CircularProgressIndicator(),
+                            ? Column(mainAxisAlignment: MainAxisAlignment.center, children: [Icon(Icons.chat_bubble_outline, size: 48, color: colorScheme.outline), const SizedBox(height: 16), Text('暂无消息', style: TextStyle(color: colorScheme.outline))])
+                            : Column(mainAxisAlignment: MainAxisAlignment.center, children: [const CircularProgressIndicator(), const SizedBox(height: 16), Text('正在初始化...', style: TextStyle(color: colorScheme.outline))]),
                       )
                     : Opacity(
                         opacity: _isListReady ? 1.0 : 0.0,
@@ -843,6 +877,7 @@ class _SubChatScreenState extends State<SubChatScreen> {
 
             ],
           ),
+          // 滚动快捷按钮
           if (_showScrollButtons && hasMessages)
             Positioned(
               right: 12,
@@ -1199,4 +1234,3 @@ class _SubEditMessageDialogState extends State<_SubEditMessageDialog> {
     );
   }
 }
-
