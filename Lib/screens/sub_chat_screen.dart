@@ -105,7 +105,11 @@ class _SubChatScreenState extends State<SubChatScreen> {
       if (mounted) setState(() => _isListReady = true);
       return;
     }
-    if (!_itemScrollController.isAttached) {
+    
+    // 根据当前显示的视口选择控制器
+    final controller = _showingPrimary ? _itemScrollController : _altScrollController;
+    
+    if (!controller.isAttached) {
       // 控制器未附加，等下一帧再试
       WidgetsBinding.instance.addPostFrameCallback((_) {
         _scrollToBottomAfterRender();
@@ -114,18 +118,19 @@ class _SubChatScreenState extends State<SubChatScreen> {
     }
     
     // 第一步：跳到最后一条消息让它渲染（列表此时透明）
-    _itemScrollController.jumpTo(index: _subConversation.messages.length - 1);
+    controller.jumpTo(index: _subConversation.messages.length - 1);
     
     // 第二步：等渲染完再跳到物理底部
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!_itemScrollController.isAttached) return;
-      _itemScrollController.scrollToEnd();
+      if (!controller.isAttached) return;
+      controller.scrollToEnd();
       // 第三步：等 scrollToEnd 内部的回调执行完，再显示列表
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) setState(() => _isListReady = true);
       });
     });
   }
+
 
 
 
