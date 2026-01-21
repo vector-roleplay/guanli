@@ -576,11 +576,12 @@ class _MessageBubbleState extends State<MessageBubble> with AutomaticKeepAliveCl
         ),
         blockquotePadding: const EdgeInsets.only(left: 12),
         code: TextStyle(
-          backgroundColor: isDark ? const Color(0xFF2C2C2E) : const Color(0xFFE8E8E8),
+          // 无背景色，只用淡色字体
           fontFamily: 'monospace',
           fontSize: 13,
-          color: colorScheme.onSurface,
+          color: colorScheme.outline,  // 使用淡灰色
         ),
+
         codeblockDecoration: BoxDecoration(
           color: isDark ? const Color(0xFF1E1E1E) : const Color(0xFFF6F8FA),
           borderRadius: BorderRadius.circular(8),
