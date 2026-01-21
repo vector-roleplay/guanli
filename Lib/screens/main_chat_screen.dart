@@ -1007,16 +1007,26 @@ class _MainChatScreenState extends State<MainChatScreen> {
           Navigator.pop(ctx);
           if (_currentConversation?.id == conversation.id) {
             if (ConversationService.instance.conversations.isNotEmpty) {
-              _currentConversation = ConversationService.instance.conversations.first;
+              setState(() {
+                _currentConversation = ConversationService.instance.conversations.first;
+                _showingPrimary = true;  // 重置视口状态
+                _isListReady = false;    // 重置列表状态
+              });
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                _scrollToBottomAfterRender();
+              });
             } else {
               await _createNewConversation();
+              setState(() {});
             }
+          } else {
+            setState(() {});
           }
-          setState(() {});
         }, child: Text('删除', style: TextStyle(color: Theme.of(ctx).colorScheme.error))),
       ],
     ));
   }
+
 
   void _renameConversation(Conversation conversation) {
     final controller = TextEditingController(text: conversation.title);
