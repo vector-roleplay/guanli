@@ -1,6 +1,33 @@
 // lib/utils/message_detector.dart
 
 class MessageDetector {
+  /// 移除思维链内容，只保留正文
+  static String removeThinkingContent(String content) {
+    // 支持多种思维链格式
+    final patterns = [
+      RegExp(r'<thinking>([\s\S]*?)</thinking>', caseSensitive: false),
+      RegExp(r'<think>([\s\S]*?)</think>', caseSensitive: false),
+      RegExp(r'<\|thinking\|>([\s\S]*?)<\|/thinking\|>', caseSensitive: false),
+    ];
+    
+    String result = content;
+    for (var regex in patterns) {
+      result = result.replaceAll(regex, '');
+    }
+    
+    // 移除未闭合的思维链（流式中可能出现）
+    final unclosedPatterns = [
+      RegExp(r'<thinking>[\s\S]*$', caseSensitive: false),
+      RegExp(r'<think>[\s\S]*$', caseSensitive: false),
+    ];
+    for (var regex in unclosedPatterns) {
+      result = result.replaceAll(regex, '');
+    }
+    
+    return result.trim();
+  }
+
+
   // 检测【申请N级子界面】，返回级别数，没有则返回0
   int detectSubLevelRequest(String content) {
     // 匹配【申请一级子界面】【申请二级子界面】等
