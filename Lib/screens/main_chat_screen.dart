@@ -1083,38 +1083,34 @@ class _MainChatScreenState extends State<MainChatScreen> {
                           onNotification: _handleScrollNotification,
                           child: Stack(
                             children: [
-                              // 主视口
-                              if (_showingPrimary)
-                                _buildMessageList(
-                                  controller: _itemScrollController,
-                                  positionsListener: _itemPositionsListener,
-                                  offsetController: _scrollOffsetController,
+                              // 主视口 - 始终存在
+                              Opacity(
+                                opacity: _showingPrimary ? 1.0 : 0.0,
+                                child: IgnorePointer(
+                                  ignoring: !_showingPrimary,
+                                  child: _buildMessageList(
+                                    controller: _itemScrollController,
+                                    positionsListener: _itemPositionsListener,
+                                    offsetController: _scrollOffsetController,
+                                  ),
                                 ),
-                              // 备用视口（屏幕外）
-                              if (!_showingPrimary)
-                                _buildMessageList(
-                                  controller: _altScrollController,
-                                  positionsListener: _altPositionsListener,
-                                  offsetController: _altScrollOffsetController,
+                              ),
+                              // 备用视口 - 始终存在
+                              Opacity(
+                                opacity: _showingPrimary ? 0.0 : 1.0,
+                                child: IgnorePointer(
+                                  ignoring: _showingPrimary,
+                                  child: _buildMessageList(
+                                    controller: _altScrollController,
+                                    positionsListener: _altPositionsListener,
+                                    offsetController: _altScrollOffsetController,
+                                  ),
                                 ),
-                              // 隐藏的备用视口（用于预渲染）
-                              Offstage(
-                                offstage: true,
-                                child: _showingPrimary
-                                    ? _buildMessageList(
-                                        controller: _altScrollController,
-                                        positionsListener: _altPositionsListener,
-                                        offsetController: _altScrollOffsetController,
-                                      )
-                                    : _buildMessageList(
-                                        controller: _itemScrollController,
-                                        positionsListener: _itemPositionsListener,
-                                        offsetController: _scrollOffsetController,
-                                      ),
                               ),
                             ],
                           ),
                         ),
+
                       ),
               ),
               ChatInput(onSend: _sendMessage, enabled: !_isLoading, isGenerating: _isLoading, onStop: _stopGeneration),
