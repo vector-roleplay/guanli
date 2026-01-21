@@ -539,14 +539,16 @@ class _MessageBubbleState extends State<MessageBubble> with AutomaticKeepAliveCl
       const md.EmptyBlockSyntax(),
       const md.SetextHeaderSyntax(),
       const md.HeaderSyntax(),
-      const md.FencedCodeBlockSyntax(),  // 保留围栏代码块
-      // 故意不包含 IndentedCodeBlockSyntax
+      const md.FencedCodeBlockSyntax(),  // 围栏代码块
+      // 故意不包含 IndentedCodeBlockSyntax（缩进代码块）
       const md.BlockquoteSyntax(),
       const md.HorizontalRuleSyntax(),
       const md.UnorderedListSyntax(),
       const md.OrderedListSyntax(),
-      const md.ParagraphSyntax(),
+      const md.TableSyntax(),  // GitHub 风格表格
+      const md.ParagraphSyntax(),  // 段落必须放最后（兜底）
     ];
+
 
     return MarkdownBody(
       data: content,
