@@ -115,7 +115,25 @@ class _MainChatScreenState extends State<MainChatScreen> {
     } else {
       setState(() => _currentConversation = ConversationService.instance.conversations.first);
     }
+    // 初始化完成后，等渲染完再滚动到真正的底部
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _scrollToBottomAfterRender();
+    });
   }
+
+  void _scrollToBottomAfterRender() {
+    if (_currentConversation == null || _currentConversation!.messages.isEmpty) return;
+    if (!_itemScrollController.isAttached) return;
+    
+    // 第一步：跳到最后一条消息让它渲染
+    _itemScrollController.jumpTo(index: _currentConversation!.messages.length - 1);
+    
+    // 第二步：等渲染完再跳到物理底部
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _itemScrollController.scrollToEnd();
+    });
+  }
+
 
   @override
   void dispose() {
@@ -145,11 +163,10 @@ class _MainChatScreenState extends State<MainChatScreen> {
     Navigator.pop(context);
     // 切换会话后滚动到底部
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_currentConversation != null && _currentConversation!.messages.isNotEmpty) {
-        _scrollToBottom();
-      }
+      _scrollToBottomAfterRender();
     });
   }
+
 
 
   // 正常列表：index 0 = 最旧消息（顶部），index max = 最新消息（底部）
@@ -923,9 +940,10 @@ class _MainChatScreenState extends State<MainChatScreen> {
                           itemPositionsListener: _itemPositionsListener,
                           scrollOffsetController: _scrollOffsetController,
                           padding: const EdgeInsets.symmetric(vertical: 16),
-                          // 初始显示底部（最新消息）
+                          // 初始定位到最后一条消息
                           initialScrollIndex: _currentConversation!.messages.length - 1,
-                          initialAlignment: 1.0,  // 对齐到视口底部
+                          initialAlignment: 0.0,
+
 
                           itemCount: _currentConversation!.messages.length,
 
