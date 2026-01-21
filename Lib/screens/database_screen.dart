@@ -6,7 +6,15 @@ import '../services/database_service.dart';
 import '../services/github_service.dart';
 
 class DatabaseScreen extends StatefulWidget {
-  const DatabaseScreen({super.key});
+  final String? conversationId;
+  final String? conversationTitle;
+  
+  const DatabaseScreen({
+    super.key,
+    this.conversationId,
+    this.conversationTitle,
+  });
+
 
   @override
   State<DatabaseScreen> createState() => _DatabaseScreenState();
@@ -313,12 +321,36 @@ class _DatabaseScreenState extends State<DatabaseScreen> {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    final isConversationDb = widget.conversationId != null;
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('文件数据库'),
+        title: Column(
+          children: [
+            const Text('文件数据库'),
+            if (isConversationDb && widget.conversationTitle != null)
+              Text(
+                widget.conversationTitle!,
+                style: TextStyle(fontSize: 12, color: colorScheme.outline),
+              ),
+          ],
+        ),
         centerTitle: true,
+        actions: [
+          if (isConversationDb)
+            Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: Chip(
+                label: const Text('会话专属'),
+                backgroundColor: colorScheme.primaryContainer,
+                labelStyle: TextStyle(fontSize: 10, color: colorScheme.onPrimaryContainer),
+                padding: EdgeInsets.zero,
+                visualDensity: VisualDensity.compact,
+              ),
+            ),
+        ],
       ),
+
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : SingleChildScrollView(
