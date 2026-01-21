@@ -143,7 +143,14 @@ class _MainChatScreenState extends State<MainChatScreen> {
       _currentConversation = conversation;
     });
     Navigator.pop(context);
+    // 切换会话后滚动到底部
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_currentConversation != null && _currentConversation!.messages.isNotEmpty) {
+        _scrollToBottom();
+      }
+    });
   }
+
 
   // 正常列表：index 0 = 最旧消息（顶部），index max = 最新消息（底部）
   
@@ -916,7 +923,13 @@ class _MainChatScreenState extends State<MainChatScreen> {
                           itemPositionsListener: _itemPositionsListener,
                           scrollOffsetController: _scrollOffsetController,
                           padding: const EdgeInsets.symmetric(vertical: 16),
+                          // 初始显示底部（最新消息）
+                          initialScrollIndex: _currentConversation!.messages.isEmpty 
+                              ? 0 
+                              : _currentConversation!.messages.length - 1,
+                          initialAlignment: 1.0,  // 对齐到视口底部
                           itemCount: _currentConversation!.messages.length,
+
                           itemBuilder: (context, index) {
                             // 正常列表，index 直接对应消息索引
                             final message = _currentConversation!.messages[index];
