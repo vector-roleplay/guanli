@@ -533,20 +533,27 @@ class _MessageBubbleState extends State<MessageBubble> with AutomaticKeepAliveCl
     final colorScheme = Theme.of(context).colorScheme;
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
-    // 自定义 ExtensionSet，禁用缩进代码块，只保留围栏代码块
-    final customExtensionSet = md.ExtensionSet(
-      // 使用类型判断过滤掉 IndentedCodeBlockSyntax（比字符串匹配更可靠）
-      md.ExtensionSet.gitHubFlavored.blockSyntaxes
-          .where((syntax) => syntax is! md.IndentedCodeBlockSyntax)
-          .toList(),
-      md.ExtensionSet.gitHubFlavored.inlineSyntaxes,
-    );
-
+    // 手动指定 block 语法列表，不包含 IndentedCodeBlockSyntax（缩进代码块）
+    // 这样只有围栏代码块（```）会被渲染为代码
+    final customBlockSyntaxes = <md.BlockSyntax>[
+      const md.EmptyBlockSyntax(),
+      const md.SetextHeaderSyntax(),
+      const md.HeaderSyntax(),
+      const md.FencedCodeBlockSyntax(),  // 保留围栏代码块
+      // 故意不包含 IndentedCodeBlockSyntax
+      const md.BlockquoteSyntax(),
+      const md.HorizontalRuleSyntax(),
+      const md.UnorderedListSyntax(),
+      const md.OrderedListSyntax(),
+      const md.ParagraphSyntax(),
+    ];
 
     return MarkdownBody(
-
       data: content,
-      extensionSet: customExtensionSet,
+      blockSyntaxes: customBlockSyntaxes,
+      inlineSyntaxes: md.ExtensionSet.gitHubFlavored.inlineSyntaxes,
+      extensionSet: md.ExtensionSet.gitHubFlavored,
+
       selectable: false,
       softLineBreak: true,
       styleSheet: MarkdownStyleSheet(
