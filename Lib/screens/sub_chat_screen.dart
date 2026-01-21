@@ -291,8 +291,10 @@ class _SubChatScreenState extends State<SubChatScreen> {
     final positions = positionsListener.itemPositions.value;
     if (positions.isEmpty) return;
     
-    final maxVisible = positions.reduce((a, b) => a.index > b.index ? a : b);
-    final targetIndex = (maxVisible.index + 1).clamp(0, _subConversation.messages.length - 1);
+    // 找到顶部的消息，跳到它的下一条
+    final minVisible = positions.reduce((a, b) => a.index < b.index ? a : b);
+    final targetIndex = (minVisible.index + 1).clamp(0, _subConversation.messages.length - 1);
+
     
     controller.scrollTo(
       index: targetIndex,
