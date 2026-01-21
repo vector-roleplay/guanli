@@ -3,6 +3,8 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:archive/archive.dart';
+
 
 class GitHubFile {
   final String name;
@@ -228,4 +230,74 @@ class GitHubService {
       );
     }
   }
+
+  /// 下载仓库 Zipball 并解压，返回文件内容 Map
+  /// [repo] 仓库全名，如 "owner/repo"
+  /// [subPath] 可选，只提取指定子目录的文件
+  /// 返回 {相对路径: 文件内容}，二进制文件的内容为 null
+  Future<({Map<String, String?> files, String? error})> downloadRepoZip(String repo, {String? subPath}) async {
+    if (!_isLoggedIn) {
+      return (files: <String, String?>{}, error: '未登录');
+    }
+
+    try {
+      // 下载 zipball
+      final response = await http.get(
+        Uri.parse('https://api.github.com/repos/$repo/zipball'),
+        headers: {
+          'Authorization': 'Bearer $_token',
+          'Accept': 'application/vnd.github.v3+json',
+        },
+      );
+
+      if (response.statusCode != 200) {
+        return (files: <String, String?>{}, error: 'HTTP ${response.statusCode}');
+      }
+
+      // 解压 zip
+      final archive = ZipDecoder().decodeBytes(response.bodyBytes);
+      
+      Map<String, String?> files = {};
+      String? rootDir;
+
+      for (var file in archive) {
+        if (!file.isFile) continue;
+        
+        var path = file.name;
+        
+        // zip 解压后第一层是 "owner-repo-sha/" 目录，需要去掉
+        if (rootDir == null && path.contains('/')) {
+          rootDir = path.split('/').first;
+        }
+        if (rootDir != null && path.startsWith('$rootDir/')) {
+          path = path.substring(rootDir.length + 1);
+        }
+        
+        // 跳过空路径
+        if (path.isEmpty) continue;
+        
+        // 如果指定了子目录，只保留子目录下的文件
+        if (subPath != null && subPath.isNotEmpty) {
+          if (!path.startsWith(subPath)) continue;
+        }
+        
+        // 尝试读取为文本，失败则存 null
+        String? content;
+        try {
+          final bytes = file.content as List<int>;
+          content = utf8.decode(bytes);
+        } catch (e) {
+          // 二进制文件，content 为 null
+          content = null;
+        }
+        
+        files[path] = content;
+      }
+
+      return (files: files, error: null);
+    } catch (e) {
+      return (files: <String, String?>{}, error: e.toString());
+    }
+  }
 }
+
