@@ -4,7 +4,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:markdown/markdown.dart' as md;
+import 'package:flutter_highlight/flutter_highlight.dart';
+import 'package:flutter_highlight/themes/atom-one-dark.dart';
+import 'package:flutter_highlight/themes/github.dart';
 import 'dart:io';
+
 import '../models/message.dart';
 import 'file_attachment_view.dart';
 
@@ -439,15 +443,19 @@ class _MessageBubbleState extends State<MessageBubble> with AutomaticKeepAliveCl
   }
 
 
-  // 代码块 - 整体化样式
+  // 代码块 - 沉浸式深色风格 + 语法高亮
   Widget _buildCodeBlock(BuildContext context, String code, String? language) {
-    final colorScheme = Theme.of(context).colorScheme;
     final isDark = Theme.of(context).brightness == Brightness.dark;
     
-    // 代码块背景色
-    final bgColor = isDark ? const Color(0xFF1E1E1E) : const Color(0xFFF6F8FA);
-    // 顶部栏背景色（略深一点）
-    final headerBgColor = isDark ? const Color(0xFF252526) : const Color(0xFFEEF1F4);
+    // 沉浸式背景色 - 接近纯黑
+    final bgColor = isDark ? const Color(0xFF0d0d0d) : const Color(0xFFF8F9FA);
+    // 顶部栏分隔线颜色
+    final dividerColor = isDark ? const Color(0xFF2a2a2a) : const Color(0xFFE1E4E8);
+    // 文字颜色
+    final textColor = isDark ? const Color(0xFF6e6e6e) : const Color(0xFF57606A);
+
+    // 创建自定义主题
+    final customTheme = _getCodeTheme(isDark, bgColor);
 
     return Container(
       margin: const EdgeInsets.symmetric(vertical: 8),
@@ -455,19 +463,24 @@ class _MessageBubbleState extends State<MessageBubble> with AutomaticKeepAliveCl
       decoration: BoxDecoration(
         color: bgColor,
         borderRadius: BorderRadius.circular(8),
+        // 极细的半透明边框，增加层次感
         border: Border.all(
-          color: isDark ? const Color(0xFF3C3C3C) : const Color(0xFFE1E4E8),
-          width: 1,
+          color: isDark ? Colors.white.withOpacity(0.05) : Colors.black.withOpacity(0.08),
+          width: 0.5,
         ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // 顶部栏 - 无边框分隔，通过背景色区分
+          // 顶部栏 - 融入背景，只有细分隔线
           Container(
             width: double.infinity,
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            color: headerBgColor,
+            decoration: BoxDecoration(
+              border: Border(
+                bottom: BorderSide(color: dividerColor, width: 0.5),
+              ),
+            ),
             child: Row(
               children: [
                 if (language?.isNotEmpty == true)
@@ -476,7 +489,7 @@ class _MessageBubbleState extends State<MessageBubble> with AutomaticKeepAliveCl
                     style: TextStyle(
                       fontSize: 12,
                       fontWeight: FontWeight.w500,
-                      color: isDark ? const Color(0xFF8B949E) : const Color(0xFF57606A),
+                      color: textColor,
                     ),
                   ),
                 const Spacer(),
@@ -493,14 +506,14 @@ class _MessageBubbleState extends State<MessageBubble> with AutomaticKeepAliveCl
                       Icon(
                         Icons.copy_rounded,
                         size: 14,
-                        color: isDark ? const Color(0xFF8B949E) : const Color(0xFF57606A),
+                        color: textColor,
                       ),
                       const SizedBox(width: 4),
                       Text(
                         '复制',
                         style: TextStyle(
                           fontSize: 12,
-                          color: isDark ? const Color(0xFF8B949E) : const Color(0xFF57606A),
+                          color: textColor,
                         ),
                       ),
                     ],
@@ -509,18 +522,18 @@ class _MessageBubbleState extends State<MessageBubble> with AutomaticKeepAliveCl
               ],
             ),
           ),
-          // 代码内容 - 无额外装饰
+          // 代码内容 - 使用语法高亮
           SingleChildScrollView(
             scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.all(12),
-            child: Text(
+            child: HighlightView(
               code,
-              style: TextStyle(
+              language: _normalizeLanguage(language),
+              theme: customTheme,
+              padding: const EdgeInsets.all(12),
+              textStyle: const TextStyle(
                 fontFamily: 'monospace',
                 fontSize: 13,
-                color: isDark ? const Color(0xFFD4D4D4) : const Color(0xFF24292F),
                 height: 1.5,
-                letterSpacing: 0,
               ),
             ),
           ),
@@ -528,6 +541,57 @@ class _MessageBubbleState extends State<MessageBubble> with AutomaticKeepAliveCl
       ),
     );
   }
+
+  // 获取代码高亮主题
+  Map<String, TextStyle> _getCodeTheme(bool isDark, Color bgColor) {
+    if (isDark) {
+      // 基于 atom-one-dark 创建自定义深色主题
+      final theme = Map<String, TextStyle>.from(atomOneDarkTheme);
+      theme['root'] = TextStyle(
+        color: const Color(0xffabb2bf),
+        backgroundColor: bgColor,
+      );
+      return theme;
+    } else {
+      // 基于 github 创建自定义浅色主题
+      final theme = Map<String, TextStyle>.from(githubTheme);
+      theme['root'] = TextStyle(
+        color: const Color(0xff24292f),
+        backgroundColor: bgColor,
+      );
+      return theme;
+    }
+  }
+
+  // 标准化语言名称
+  String _normalizeLanguage(String? language) {
+    if (language == null || language.isEmpty) return 'plaintext';
+    
+    // 处理常见的别名
+    const aliases = {
+      'js': 'javascript',
+      'ts': 'typescript',
+      'py': 'python',
+      'rb': 'ruby',
+      'sh': 'bash',
+      'shell': 'bash',
+      'zsh': 'bash',
+      'yml': 'yaml',
+      'md': 'markdown',
+      'kt': 'kotlin',
+      'rs': 'rust',
+      'cs': 'csharp',
+      'c++': 'cpp',
+      'h': 'c',
+      'hpp': 'cpp',
+      'objective-c': 'objectivec',
+      'objc': 'objectivec',
+    };
+    
+    final lower = language.toLowerCase();
+    return aliases[lower] ?? lower;
+  }
+
 
   Widget _buildMarkdownBlock(BuildContext context, String content) {
     final colorScheme = Theme.of(context).colorScheme;
