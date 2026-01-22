@@ -528,12 +528,13 @@ class _MessageBubbleState extends State<MessageBubble> with AutomaticKeepAliveCl
               theme: customTheme,
               padding: const EdgeInsets.all(12),
               textStyle: const TextStyle(
-                fontFamily: 'monospace',
+                fontFamily: 'SarasaMono',  // 使用中英等宽字体
                 fontSize: 13,
                 height: 1.5,
               ),
             ),
           ),
+
         ],
       ),
     );
