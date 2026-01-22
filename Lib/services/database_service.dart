@@ -274,7 +274,7 @@ class DatabaseService {
   Future<String> getDirectoryTree() async {
     final files = await db.query(
       'files',
-      columns: ['path', 'name', 'is_directory'],  // 只查这3个字段
+      columns: ['path', 'name', 'is_directory', 'parent_path'],
       orderBy: 'path',
     );
 
@@ -286,16 +286,27 @@ class DatabaseService {
       final path = file['path'] as String;
       final name = file['name'] as String;
       final isDir = file['is_directory'] == 1;
+      final parentPath = file['parent_path'];
       
       final depth = path.split('/').length - 1;
       final prefix = '  ' * depth;
-      final icon = isDir ? '📁' : '📄';
+      
+      // 根目录（仓库）用特殊图标，更醒目
+      String icon;
+      if (isDir && parentPath == null) {
+        icon = '📦';  // 仓库根目录
+      } else if (isDir) {
+        icon = '📁';  // 普通目录
+      } else {
+        icon = '📄';  // 文件
+      }
       
       tree.writeln('$prefix$icon $name');
     }
 
     return tree.toString();
   }
+
 
   // 根据路径获取文件内容（单独查询，不会爆内存）
   Future<String?> getFileContent(String path) async {
