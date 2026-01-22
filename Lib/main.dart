@@ -54,9 +54,20 @@ class MyApp extends StatelessWidget {
           colorScheme: ColorScheme.fromSeed(
             seedColor: Colors.blue,
             brightness: Brightness.dark,
+            surface: Colors.black,
+          ),
+          scaffoldBackgroundColor: Colors.black,
+          appBarTheme: const AppBarTheme(
+            backgroundColor: Colors.black,
+            surfaceTintColor: Colors.transparent,
+            elevation: 0,
+          ),
+          drawerTheme: const DrawerThemeData(
+            backgroundColor: Colors.black,
           ),
           useMaterial3: true,
         ),
+
         themeMode: ThemeMode.system,
         home: const PermissionWrapper(),
       ),
