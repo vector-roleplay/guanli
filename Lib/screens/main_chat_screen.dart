@@ -45,11 +45,14 @@ class _MainChatScreenState extends State<MainChatScreen> {
   final ItemScrollController _altScrollController = ItemScrollController();
   final ItemPositionsListener _altPositionsListener = ItemPositionsListener.create();
   final ScrollOffsetController _altScrollOffsetController = ScrollOffsetController();
-  // 备用视口是否激活（只在特定场景临时启用）
+  // 备用视口是否激活（控制是否创建）
   bool _isAltViewportActive = false;
+  // 是否显示备用视口（控制切换时机）
+  bool _showAltViewport = false;
 
   
   String _directoryTree = '';
+
 
   Conversation? _currentConversation;
   bool _isLoading = false;
@@ -130,7 +133,6 @@ class _MainChatScreenState extends State<MainChatScreen> {
       _scrollToBottomWithAltViewport();
     });
   }
-
   /// 使用备用视口策略滚动到底部（用于初始化、切换会话）
   void _scrollToBottomWithAltViewport() {
     if (_currentConversation == null || _currentConversation!.messages.isEmpty) {
@@ -140,8 +142,11 @@ class _MainChatScreenState extends State<MainChatScreen> {
     
     final messageCount = _currentConversation!.messages.length;
     
-    // 激活备用视口
-    setState(() => _isAltViewportActive = true);
+    // 第一步：创建备用视口（透明状态），主视口仍显示
+    setState(() {
+      _isAltViewportActive = true;
+      _showAltViewport = false;
+    });
     
     // 等备用视口构建完成
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -153,39 +158,53 @@ class _MainChatScreenState extends State<MainChatScreen> {
         return;
       }
       
-      // 备用视口跳到最后一条消息
+      // 备用视口跳到最后一条消息，开始渲染
       _altScrollController.jumpTo(index: messageCount - 1);
       
-      // 主视口也跳到最后一条消息（虽然透明但仍在运行）
-      if (_itemScrollController.isAttached) {
-        _itemScrollController.jumpTo(index: messageCount - 1);
-      }
-      
-      // 等待渲染完成
+      // 等待备用视口渲染完成
       WidgetsBinding.instance.addPostFrameCallback((_) {
         // 备用视口跳到物理底边
         if (_altScrollController.isAttached) {
           _altScrollController.scrollToEnd();
         }
         
-        // 主视口也跳到物理底边
-        if (_itemScrollController.isAttached) {
-          _itemScrollController.scrollToEnd();
-        }
-        
-        // 等待主视口完成，然后切换回主视口
+        // 第二步：备用视口准备好了，切换显示（主视口透明，备用视口现身）
         WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted) {
-            setState(() {
-              _isAltViewportActive = false;  // 切换回主视口，备用视口销毁
-              _isListReady = true;
-              _isNearBottom = true;
+          if (!mounted) return;
+          setState(() {
+            _showAltViewport = true;
+            _isListReady = true;
+          });
+          
+          // 第三步：主视口开始操作（此时用户看到的是备用视口）
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (_itemScrollController.isAttached) {
+              _itemScrollController.jumpTo(index: messageCount - 1);
+            }
+            
+            // 等待主视口渲染完成
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (_itemScrollController.isAttached) {
+                _itemScrollController.scrollToEnd();
+              }
+              
+              // 第四步：主视口准备好了，切换回主视口，销毁备用视口
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (mounted) {
+                  setState(() {
+                    _isAltViewportActive = false;
+                    _showAltViewport = false;
+                    _isNearBottom = true;
+                  });
+                }
+              });
             });
-          }
+          });
         });
       });
     });
   }
+
 
 
 
@@ -215,16 +234,19 @@ class _MainChatScreenState extends State<MainChatScreen> {
     final conversation = await ConversationService.instance.create();
     setState(() {
       _currentConversation = conversation;
-      _isAltViewportActive = false;  // 确保备用视口关闭
+      _isAltViewportActive = false;
+      _showAltViewport = false;
     });
   }
 
   void _switchConversation(Conversation conversation) {
     setState(() {
       _currentConversation = conversation;
-      _isListReady = false;  // 重置，等待重新定位
-      _isAltViewportActive = false;  // 确保备用视口关闭
+      _isListReady = false;
+      _isAltViewportActive = false;
+      _showAltViewport = false;
     });
+
     Navigator.pop(context);
     // 切换会话后加载该会话的数据库，使用备用视口策略滚动到底部
     _loadDirectoryTree();
@@ -246,15 +268,17 @@ class _MainChatScreenState extends State<MainChatScreen> {
       setState(() => _isListReady = true);
     }
   }
-
   /// 强制滚动到底部（使用备用视口策略）
   void _forceScrollToBottom() {
     if (_currentConversation == null || _currentConversation!.messages.isEmpty) return;
     
     final messageCount = _currentConversation!.messages.length;
     
-    // 激活备用视口
-    setState(() => _isAltViewportActive = true);
+    // 第一步：创建备用视口（透明状态）
+    setState(() {
+      _isAltViewportActive = true;
+      _showAltViewport = false;
+    });
     
     // 等备用视口构建完成
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -269,6 +293,7 @@ class _MainChatScreenState extends State<MainChatScreen> {
             if (mounted) {
               setState(() {
                 _isAltViewportActive = false;
+                _showAltViewport = false;
                 _isNearBottom = true;
               });
             }
@@ -277,38 +302,50 @@ class _MainChatScreenState extends State<MainChatScreen> {
         return;
       }
       
-      // 备用视口跳到最后一条消息
+      // 备用视口跳到最后一条消息，开始渲染
       _altScrollController.jumpTo(index: messageCount - 1);
       
-      // 主视口也跳到最后一条消息
-      if (_itemScrollController.isAttached) {
-        _itemScrollController.jumpTo(index: messageCount - 1);
-      }
-      
-      // 等待渲染完成
+      // 等待备用视口渲染完成
       WidgetsBinding.instance.addPostFrameCallback((_) {
         // 备用视口跳到物理底边
         if (_altScrollController.isAttached) {
           _altScrollController.scrollToEnd();
         }
         
-        // 主视口也跳到物理底边
-        if (_itemScrollController.isAttached) {
-          _itemScrollController.scrollToEnd();
-        }
-        
-        // 等待完成，切换回主视口
+        // 第二步：备用视口准备好了，切换显示
         WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted) {
-            setState(() {
-              _isAltViewportActive = false;  // 切换回主视口，备用视口销毁
-              _isNearBottom = true;
+          if (!mounted) return;
+          setState(() => _showAltViewport = true);
+          
+          // 第三步：主视口开始操作
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (_itemScrollController.isAttached) {
+              _itemScrollController.jumpTo(index: messageCount - 1);
+            }
+            
+            // 等待主视口渲染完成
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (_itemScrollController.isAttached) {
+                _itemScrollController.scrollToEnd();
+              }
+              
+              // 第四步：切换回主视口，销毁备用视口
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (mounted) {
+                  setState(() {
+                    _isAltViewportActive = false;
+                    _showAltViewport = false;
+                    _isNearBottom = true;
+                  });
+                }
+              });
             });
-          }
+          });
         });
       });
     });
   }
+
 
   void _scrollToTop() {
     if (_currentConversation == null || _currentConversation!.messages.isEmpty) return;
@@ -1020,8 +1057,10 @@ class _MainChatScreenState extends State<MainChatScreen> {
           await ConversationService.instance.update(_currentConversation!);
           Navigator.pop(ctx);
           setState(() {
-            _isAltViewportActive = false;  // 确保备用视口关闭
+            _isAltViewportActive = false;
+            _showAltViewport = false;
           });
+
         }, child: const Text('确定')),
       ],
     ));
@@ -1045,9 +1084,11 @@ class _MainChatScreenState extends State<MainChatScreen> {
             if (ConversationService.instance.conversations.isNotEmpty) {
               setState(() {
                 _currentConversation = ConversationService.instance.conversations.first;
-                _isAltViewportActive = false;  // 确保备用视口关闭
-                _isListReady = false;    // 重置列表状态
+                _isAltViewportActive = false;
+                _showAltViewport = false;
+                _isListReady = false;
               });
+
               WidgetsBinding.instance.addPostFrameCallback((_) {
                 _scrollToBottomWithAltViewport();
               });
@@ -1138,9 +1179,9 @@ class _MainChatScreenState extends State<MainChatScreen> {
                             children: [
                               // 主视口 - 始终存在
                               Opacity(
-                                opacity: _isAltViewportActive ? 0.0 : 1.0,
+                                opacity: (_isAltViewportActive && _showAltViewport) ? 0.0 : 1.0,
                                 child: IgnorePointer(
-                                  ignoring: _isAltViewportActive,
+                                  ignoring: _isAltViewportActive && _showAltViewport,
                                   child: _buildMessageList(
                                     controller: _itemScrollController,
                                     positionsListener: _itemPositionsListener,
@@ -1150,13 +1191,17 @@ class _MainChatScreenState extends State<MainChatScreen> {
                               ),
                               // 备用视口 - 只在激活时创建（1屏无缓存）
                               if (_isAltViewportActive)
-                                _buildMessageList(
-                                  controller: _altScrollController,
-                                  positionsListener: _altPositionsListener,
-                                  offsetController: _altScrollOffsetController,
-                                  minCacheExtent: 0,  // 无缓存，只渲染1屏
+                                Opacity(
+                                  opacity: _showAltViewport ? 1.0 : 0.0,
+                                  child: _buildMessageList(
+                                    controller: _altScrollController,
+                                    positionsListener: _altPositionsListener,
+                                    offsetController: _altScrollOffsetController,
+                                    minCacheExtent: 0,
+                                  ),
                                 ),
                             ],
+
                           ),
                         ),
                       ),
