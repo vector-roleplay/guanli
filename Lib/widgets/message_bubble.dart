@@ -443,16 +443,17 @@ class _MessageBubbleState extends State<MessageBubble> with AutomaticKeepAliveCl
   }
 
 
-  // 代码块 - 沉浸式深色风格 + 语法高亮
+  // 代码块 - 深灰色背景风格 + 语法高亮
   Widget _buildCodeBlock(BuildContext context, String code, String? language) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     
-    // 沉浸式背景色 - 接近纯黑
-    final bgColor = isDark ? const Color(0xFF0d0d0d) : const Color(0xFFF8F9FA);
+    // 代码块背景色 - 深灰色（与图片一致）
+    final bgColor = isDark ? const Color(0xFF1a1a1a) : const Color(0xFFF8F9FA);
     // 顶部栏分隔线颜色
-    final dividerColor = isDark ? const Color(0xFF2a2a2a) : const Color(0xFFE1E4E8);
+    final dividerColor = isDark ? const Color(0xFF333333) : const Color(0xFFE1E4E8);
     // 文字颜色
-    final textColor = isDark ? const Color(0xFF6e6e6e) : const Color(0xFF57606A);
+    final textColor = isDark ? const Color(0xFF888888) : const Color(0xFF57606A);
+
 
     // 创建自定义主题
     final customTheme = _getCodeTheme(isDark, bgColor);
@@ -462,13 +463,9 @@ class _MessageBubbleState extends State<MessageBubble> with AutomaticKeepAliveCl
       clipBehavior: Clip.antiAlias,
       decoration: BoxDecoration(
         color: bgColor,
-        borderRadius: BorderRadius.circular(8),
-        // 极细的半透明边框，增加层次感
-        border: Border.all(
-          color: isDark ? Colors.white.withOpacity(0.05) : Colors.black.withOpacity(0.08),
-          width: 0.5,
-        ),
+        borderRadius: BorderRadius.circular(12),
       ),
+
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -545,14 +542,15 @@ class _MessageBubbleState extends State<MessageBubble> with AutomaticKeepAliveCl
   // 获取代码高亮主题
   Map<String, TextStyle> _getCodeTheme(bool isDark, Color bgColor) {
     if (isDark) {
-      // 基于 atom-one-dark 创建自定义深色主题
+      // 基于 atom-one-dark 创建自定义深色主题，调整颜色更柔和
       final theme = Map<String, TextStyle>.from(atomOneDarkTheme);
       theme['root'] = TextStyle(
-        color: const Color(0xffabb2bf),
+        color: const Color(0xffc9d1d9),
         backgroundColor: bgColor,
       );
       return theme;
     } else {
+
       // 基于 github 创建自定义浅色主题
       final theme = Map<String, TextStyle>.from(githubTheme);
       theme['root'] = TextStyle(
