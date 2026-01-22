@@ -253,10 +253,15 @@ class ApiService {
             
             try {
               final json = jsonDecode(data);
+              
+              // 补全缺失的 choices 定义
+              final choices = json['choices'] as List?;
 
+              if (choices != null && choices.isNotEmpty) {
                 final delta = choices[0]['delta'];
                 if (delta != null) {
                   // 先处理思维链 (reasoning_content)
+
                   final reasoning = delta['reasoning_content'] ?? delta['reasoning'];
                   if (reasoning != null && reasoning.isNotEmpty) {
                     if (!reasoningStarted) {
@@ -451,10 +456,17 @@ class ApiService {
             if (data.isNotEmpty) {
               try {
                 final json = jsonDecode(data);
-
+                
+                // 补全缺失的 delta 和 reasoning 定义
+                final delta = json['choices']?[0]?['delta'];
+                if (delta != null) {
+                  // 先处理思维链
+                  final reasoning = delta['reasoning_content'] ?? delta['reasoning'];
+                  
                   if (reasoning != null && reasoning.isNotEmpty) {
                     if (!reasoningStarted) {
                       yield '<think>';
+
                       reasoningStarted = true;
                     }
                     yield reasoning;
