@@ -45,13 +45,12 @@ class _MainChatScreenState extends State<MainChatScreen> {
   final ItemScrollController _altScrollController = ItemScrollController();
   final ItemPositionsListener _altPositionsListener = ItemPositionsListener.create();
   final ScrollOffsetController _altScrollOffsetController = ScrollOffsetController();
-  
-  // 当前显示主视口还是备用视口
-  bool _showingPrimary = true;
-
+  // 备用视口是否激活（只在特定场景临时启用）
+  bool _isAltViewportActive = false;
 
   
   String _directoryTree = '';
+
   Conversation? _currentConversation;
   bool _isLoading = false;
   bool _stopRequested = false;
@@ -78,12 +77,12 @@ class _MainChatScreenState extends State<MainChatScreen> {
     _itemPositionsListener.itemPositions.addListener(_onPositionsChange);
     _altPositionsListener.itemPositions.addListener(_onPositionsChange);
   }
-
-
   void _onPositionsChange() {
-    // 根据当前显示的视口选择监听器
-    final positionsListener = _showingPrimary ? _itemPositionsListener : _altPositionsListener;
-    final positions = positionsListener.itemPositions.value;
+    // 备用视口激活时不处理位置变化
+    if (_isAltViewportActive) return;
+    
+    // 只监听主视口
+    final positions = _itemPositionsListener.itemPositions.value;
     if (positions.isEmpty || _currentConversation == null) return;
     
     final maxIndex = _currentConversation!.messages.length - 1;
@@ -93,6 +92,7 @@ class _MainChatScreenState extends State<MainChatScreen> {
       setState(() => _isNearBottom = isBottomVisible);
     }
   }
+
 
 
   // 处理滚动通知，只在用户手动滑动时显示按钮
@@ -116,10 +116,6 @@ class _MainChatScreenState extends State<MainChatScreen> {
     
     return false; // 不阻止通知继续传递
   }
-
-
-
-
   Future<void> _init() async {
     await _loadDirectoryTree();
     await ConversationService.instance.load();
@@ -129,43 +125,68 @@ class _MainChatScreenState extends State<MainChatScreen> {
     } else {
       setState(() => _currentConversation = ConversationService.instance.conversations.first);
     }
-    // 初始化完成后，等渲染完再滚动到真正的底部
+    // 初始化完成后，使用备用视口策略滚动到底部
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _scrollToBottomAfterRender();
+      _scrollToBottomWithAltViewport();
     });
   }
 
-  void _scrollToBottomAfterRender() {
+  /// 使用备用视口策略滚动到底部（用于初始化、切换会话）
+  void _scrollToBottomWithAltViewport() {
     if (_currentConversation == null || _currentConversation!.messages.isEmpty) {
-      // 没有消息，直接显示
       if (mounted) setState(() => _isListReady = true);
       return;
     }
     
-    // 根据当前显示的视口选择控制器
-    final controller = _showingPrimary ? _itemScrollController : _altScrollController;
+    final messageCount = _currentConversation!.messages.length;
     
-    if (!controller.isAttached) {
-      // 控制器未附加，等下一帧再试
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        _scrollToBottomAfterRender();
-      });
-      return;
-    }
+    // 激活备用视口
+    setState(() => _isAltViewportActive = true);
     
-    // 第一步：跳到最后一条消息让它渲染（列表此时透明）
-    controller.jumpTo(index: _currentConversation!.messages.length - 1);
-    
-    // 第二步：等渲染完再跳到物理底部
+    // 等备用视口构建完成
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!controller.isAttached) return;
-      controller.scrollToEnd();
-      // 第三步：等 scrollToEnd 内部的回调执行完，再显示列表
+      if (!_altScrollController.isAttached) {
+        // 备用视口未就绪，重试
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          _scrollToBottomWithAltViewport();
+        });
+        return;
+      }
+      
+      // 备用视口跳到最后一条消息
+      _altScrollController.jumpTo(index: messageCount - 1);
+      
+      // 主视口也跳到最后一条消息（虽然透明但仍在运行）
+      if (_itemScrollController.isAttached) {
+        _itemScrollController.jumpTo(index: messageCount - 1);
+      }
+      
+      // 等待渲染完成
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) setState(() => _isListReady = true);
+        // 备用视口跳到物理底边
+        if (_altScrollController.isAttached) {
+          _altScrollController.scrollToEnd();
+        }
+        
+        // 主视口也跳到物理底边
+        if (_itemScrollController.isAttached) {
+          _itemScrollController.scrollToEnd();
+        }
+        
+        // 等待主视口完成，然后切换回主视口
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) {
+            setState(() {
+              _isAltViewportActive = false;  // 切换回主视口，备用视口销毁
+              _isListReady = true;
+              _isNearBottom = true;
+            });
+          }
+        });
       });
     });
   }
+
 
 
 
@@ -190,123 +211,126 @@ class _MainChatScreenState extends State<MainChatScreen> {
     final tree = await DatabaseService.instance.getDirectoryTree();
     setState(() => _directoryTree = tree);
   }
-
-
   Future<void> _createNewConversation() async {
     final conversation = await ConversationService.instance.create();
     setState(() {
       _currentConversation = conversation;
-      _showingPrimary = true;  // 重置视口状态
+      _isAltViewportActive = false;  // 确保备用视口关闭
     });
   }
-
 
   void _switchConversation(Conversation conversation) {
     setState(() {
       _currentConversation = conversation;
       _isListReady = false;  // 重置，等待重新定位
-      _showingPrimary = true;  // 重置视口状态
+      _isAltViewportActive = false;  // 确保备用视口关闭
     });
     Navigator.pop(context);
-    // 切换会话后加载该会话的数据库和滚动到底部
+    // 切换会话后加载该会话的数据库，使用备用视口策略滚动到底部
     _loadDirectoryTree();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _scrollToBottomAfterRender();
+      _scrollToBottomWithAltViewport();
     });
   }
-
-
-
-
-
-
   // 正常列表：index 0 = 最旧消息（顶部），index max = 最新消息（底部）
   
   void _scrollToBottom() {
     if (_currentConversation == null || _currentConversation!.messages.isEmpty) return;
     
-    final controller = _showingPrimary ? _itemScrollController : _altScrollController;
-    if (!controller.isAttached) return;
+    // 只用主视口
+    if (!_itemScrollController.isAttached) return;
     
-    controller.scrollToEnd();
+    _itemScrollController.scrollToEnd();
     // 确保列表可见（用于发送消息后的滚动）
     if (!_isListReady && mounted) {
       setState(() => _isListReady = true);
     }
   }
 
-
-
-
+  /// 强制滚动到底部（使用备用视口策略）
   void _forceScrollToBottom() {
     if (_currentConversation == null || _currentConversation!.messages.isEmpty) return;
     
-    // 获取当前隐藏的备用视口控制器
-    final altController = _showingPrimary ? _altScrollController : _itemScrollController;
+    final messageCount = _currentConversation!.messages.length;
     
-    if (!altController.isAttached) {
-      // 备用视口未就绪，使用普通方式
-      final currentController = _showingPrimary ? _itemScrollController : _altScrollController;
-      if (currentController.isAttached) {
-        currentController.scrollToEnd();
-      }
-      setState(() => _isNearBottom = true);
-      return;
-    }
+    // 激活备用视口
+    setState(() => _isAltViewportActive = true);
     
-    // 在备用视口中跳转到底部
-    altController.jumpTo(index: _currentConversation!.messages.length - 1);
-    
-    // 等待渲染完成
+    // 等备用视口构建完成
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!altController.isAttached) return;
-      altController.scrollToEnd();
+      if (!_altScrollController.isAttached) {
+        // 备用视口未就绪，回退到普通方式
+        if (_itemScrollController.isAttached) {
+          _itemScrollController.jumpTo(index: messageCount - 1);
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (_itemScrollController.isAttached) {
+              _itemScrollController.scrollToEnd();
+            }
+            if (mounted) {
+              setState(() {
+                _isAltViewportActive = false;
+                _isNearBottom = true;
+              });
+            }
+          });
+        }
+        return;
+      }
       
-      // 再等一帧确保完全渲染
+      // 备用视口跳到最后一条消息
+      _altScrollController.jumpTo(index: messageCount - 1);
+      
+      // 主视口也跳到最后一条消息
+      if (_itemScrollController.isAttached) {
+        _itemScrollController.jumpTo(index: messageCount - 1);
+      }
+      
+      // 等待渲染完成
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted) return;
-        // 切换显示
-        setState(() {
-          _showingPrimary = !_showingPrimary;
-          _isNearBottom = true;
+        // 备用视口跳到物理底边
+        if (_altScrollController.isAttached) {
+          _altScrollController.scrollToEnd();
+        }
+        
+        // 主视口也跳到物理底边
+        if (_itemScrollController.isAttached) {
+          _itemScrollController.scrollToEnd();
+        }
+        
+        // 等待完成，切换回主视口
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) {
+            setState(() {
+              _isAltViewportActive = false;  // 切换回主视口，备用视口销毁
+              _isNearBottom = true;
+            });
+          }
         });
       });
     });
   }
 
-
-
   void _scrollToTop() {
     if (_currentConversation == null || _currentConversation!.messages.isEmpty) return;
     
-    final controller = _showingPrimary ? _itemScrollController : _altScrollController;
-    if (!controller.isAttached) return;
+    // 只用主视口
+    if (!_itemScrollController.isAttached) return;
     
-    controller.scrollToStart();
+    _itemScrollController.scrollToStart();
   }
-
-
-
-
-
-
-
-
   void _scrollToPreviousMessage() {
     if (_currentConversation == null || _currentConversation!.messages.isEmpty) return;
     
-    final controller = _showingPrimary ? _itemScrollController : _altScrollController;
-    final positionsListener = _showingPrimary ? _itemPositionsListener : _altPositionsListener;
+    // 只用主视口
+    if (!_itemScrollController.isAttached) return;
     
-    if (!controller.isAttached) return;
-    
-    final positions = positionsListener.itemPositions.value;
+    final positions = _itemPositionsListener.itemPositions.value;
     if (positions.isEmpty) return;
     
     final minVisible = positions.reduce((a, b) => a.index < b.index ? a : b);
     final targetIndex = (minVisible.index - 1).clamp(0, _currentConversation!.messages.length - 1);
     
-    controller.scrollTo(
+    _itemScrollController.scrollTo(
       index: targetIndex,
       duration: const Duration(milliseconds: 300),
       curve: Curves.easeOut,
@@ -314,39 +338,37 @@ class _MainChatScreenState extends State<MainChatScreen> {
     );
   }
 
-
   void _scrollToNextMessage() {
     if (_currentConversation == null || _currentConversation!.messages.isEmpty) return;
     
-    final controller = _showingPrimary ? _itemScrollController : _altScrollController;
-    final positionsListener = _showingPrimary ? _itemPositionsListener : _altPositionsListener;
+    // 只用主视口
+    if (!_itemScrollController.isAttached) return;
     
-    if (!controller.isAttached) return;
-    
-    final positions = positionsListener.itemPositions.value;
+    final positions = _itemPositionsListener.itemPositions.value;
     if (positions.isEmpty) return;
     
     // 找到顶部的消息，跳到它的下一条
     final minVisible = positions.reduce((a, b) => a.index < b.index ? a : b);
     final targetIndex = (minVisible.index + 1).clamp(0, _currentConversation!.messages.length - 1);
-
     
-    controller.scrollTo(
+    _itemScrollController.scrollTo(
       index: targetIndex,
       duration: const Duration(milliseconds: 300),
       curve: Curves.easeOut,
       alignment: 0.0,
     );
   }
-
   // 构建消息列表（复用代码）
 
   Widget _buildMessageList({
     required ItemScrollController controller,
     required ItemPositionsListener positionsListener,
     required ScrollOffsetController offsetController,
+    double? minCacheExtent,  // 备用视口用0，主视口用默认值
   }) {
     return ScrollablePositionedList.builder(
+      minCacheExtent: minCacheExtent,
+
       itemScrollController: controller,
       itemPositionsListener: positionsListener,
       scrollOffsetController: offsetController,
@@ -988,7 +1010,6 @@ class _MainChatScreenState extends State<MainChatScreen> {
     }
     setState(() {});
   }
-
   void _clearCurrentChat() {
     showDialog(context: context, builder: (ctx) => AlertDialog(
       title: const Text('清空对话'), content: const Text('确定要清空当前对话记录吗？'),
@@ -999,12 +1020,13 @@ class _MainChatScreenState extends State<MainChatScreen> {
           await ConversationService.instance.update(_currentConversation!);
           Navigator.pop(ctx);
           setState(() {
-            _showingPrimary = true;  // 重置视口状态
+            _isAltViewportActive = false;  // 确保备用视口关闭
           });
         }, child: const Text('确定')),
       ],
     ));
   }
+
 
 
 
@@ -1018,18 +1040,18 @@ class _MainChatScreenState extends State<MainChatScreen> {
           await DatabaseService.instance.deleteConversationDatabase(conversation.id);
           await SubConversationService.instance.deleteByRootId(conversation.id);
           await ConversationService.instance.delete(conversation.id);
-
           Navigator.pop(ctx);
           if (_currentConversation?.id == conversation.id) {
             if (ConversationService.instance.conversations.isNotEmpty) {
               setState(() {
                 _currentConversation = ConversationService.instance.conversations.first;
-                _showingPrimary = true;  // 重置视口状态
+                _isAltViewportActive = false;  // 确保备用视口关闭
                 _isListReady = false;    // 重置列表状态
               });
               WidgetsBinding.instance.addPostFrameCallback((_) {
-                _scrollToBottomAfterRender();
+                _scrollToBottomWithAltViewport();
               });
+
             } else {
               await _createNewConversation();
               setState(() {});
@@ -1116,9 +1138,9 @@ class _MainChatScreenState extends State<MainChatScreen> {
                             children: [
                               // 主视口 - 始终存在
                               Opacity(
-                                opacity: _showingPrimary ? 1.0 : 0.0,
+                                opacity: _isAltViewportActive ? 0.0 : 1.0,
                                 child: IgnorePointer(
-                                  ignoring: !_showingPrimary,
+                                  ignoring: _isAltViewportActive,
                                   child: _buildMessageList(
                                     controller: _itemScrollController,
                                     positionsListener: _itemPositionsListener,
@@ -1126,23 +1148,19 @@ class _MainChatScreenState extends State<MainChatScreen> {
                                   ),
                                 ),
                               ),
-                              // 备用视口 - 始终存在
-                              Opacity(
-                                opacity: _showingPrimary ? 0.0 : 1.0,
-                                child: IgnorePointer(
-                                  ignoring: _showingPrimary,
-                                  child: _buildMessageList(
-                                    controller: _altScrollController,
-                                    positionsListener: _altPositionsListener,
-                                    offsetController: _altScrollOffsetController,
-                                  ),
+                              // 备用视口 - 只在激活时创建（1屏无缓存）
+                              if (_isAltViewportActive)
+                                _buildMessageList(
+                                  controller: _altScrollController,
+                                  positionsListener: _altPositionsListener,
+                                  offsetController: _altScrollOffsetController,
+                                  minCacheExtent: 0,  // 无缓存，只渲染1屏
                                 ),
-                              ),
                             ],
                           ),
                         ),
-
                       ),
+
               ),
               ChatInput(onSend: _sendMessage, enabled: !_isLoading, isGenerating: _isLoading, onStop: _stopGeneration),
 
