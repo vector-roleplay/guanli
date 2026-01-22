@@ -254,8 +254,19 @@ class ApiService {
             try {
               final json = jsonDecode(data);
               
-              // 补全缺失的 choices 定义
+              // 解析 usage（在最后一个 chunk 中，与 finish_reason 一起返回）
+              if (json['usage'] != null) {
+                final usage = json['usage'] as Map<String, dynamic>;
+                realPromptTokens = usage['prompt_tokens'] as int? ?? 
+                                   usage['promptTokens'] as int?;
+                realCompletionTokens = usage['completion_tokens'] as int? ?? 
+                                       usage['completionTokens'] as int?;
+                print('📊 收到真实Token: prompt=$realPromptTokens, completion=$realCompletionTokens');
+              }
+              
+              // 解析内容
               final choices = json['choices'] as List?;
+
 
               if (choices != null && choices.isNotEmpty) {
                 final delta = choices[0]['delta'];
