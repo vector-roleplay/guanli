@@ -31,6 +31,19 @@ class FileAttachmentView extends StatelessWidget {
     required this.files,
   });
 
+  /// 计算总大小并格式化
+  String get _totalSizeFormatted {
+    final totalBytes = files.fold<int>(0, (sum, file) => sum + file.size);
+    return _formatBytes(totalBytes);
+  }
+
+  String _formatBytes(int bytes) {
+    if (bytes < 1024) return '$bytes B';
+    if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
+    if (bytes < 1024 * 1024 * 1024) return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+    return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(1)} GB';
+  }
+
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
@@ -38,14 +51,27 @@ class FileAttachmentView extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          '📎 附带文件 (${files.length}个)',
-          style: TextStyle(
-            fontSize: 12,
-            fontWeight: FontWeight.bold,
-            color: colorScheme.primary,
-          ),
+        Row(
+          children: [
+            Text(
+              '📎 附带文件 (${files.length}个)',
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.bold,
+                color: colorScheme.primary,
+              ),
+            ),
+            const SizedBox(width: 8),
+            Text(
+              '· 共 $_totalSizeFormatted',
+              style: TextStyle(
+                fontSize: 12,
+                color: colorScheme.outline,
+              ),
+            ),
+          ],
         ),
+
         const SizedBox(height: 8),
         Wrap(
           spacing: 8,
