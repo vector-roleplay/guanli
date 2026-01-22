@@ -567,15 +567,15 @@ class _SubChatScreenState extends State<SubChatScreen> {
       }
     }
   }
-
   Future<void> _sendSystemMessage({required String displayContent, required String fullContent, List<EmbeddedFile>? embeddedFiles}) async {
     final systemMessage = Message(role: MessageRole.user, content: displayContent, fullContent: fullContent, embeddedFiles: embeddedFiles ?? [], status: MessageStatus.sent);
     _subConversation.messages.add(systemMessage);
     await SubConversationService.instance.update(_subConversation);
     setState(() {});
-    _scrollToBottomAfterRender();  // ✅ 改用带递归重试的方法
+    _scrollToBottom();  // 发送消息后普通滚动即可
     await _requestAIResponse();
   }
+
 
 
   void _stopGeneration() {
