@@ -28,8 +28,11 @@ dependencies:
   uuid: any
   permission_handler: any
   archive: any
+  flutter_highlight: any
+  highlight: any
 
   device_info_plus: any
+
   scrollable_positioned_list:
     path: lib/third_party/scrollable_positioned_list
 
