@@ -228,12 +228,22 @@ class ApiService {
       StringBuffer fullContent = StringBuffer();
       int? realPromptTokens;
       int? realCompletionTokens;
+      
+      // 1. 新增缓冲区
+      String buffer = '';
 
       await for (var chunk in response.stream.transform(utf8.decoder)) {
         if (_isCancelled) break;
         
-        final lines = chunk.split('\n');
-        for (var line in lines) {
+        // 2. 累加数据到缓冲区
+        buffer += chunk;
+        
+        // 3. 循环处理缓冲区中完整的行
+        while (buffer.contains('\n')) {
+          final index = buffer.indexOf('\n');
+          final line = buffer.substring(0, index).trim();
+          buffer = buffer.substring(index + 1); // 移除已处理的行
+          
           if (_isCancelled) break;
           
           if (line.startsWith('data: ')) {
@@ -243,22 +253,7 @@ class ApiService {
             
             try {
               final json = jsonDecode(data);
-              
-              // 解析 usage（在最后一个 chunk 中，与 finish_reason 一起返回）
-              if (json['usage'] != null) {
-                final usage = json['usage'] as Map<String, dynamic>;
-                realPromptTokens = usage['prompt_tokens'] as int? ?? 
-                                   usage['promptTokens'] as int?;  // 兼容不同格式
-                realCompletionTokens = usage['completion_tokens'] as int? ?? 
-                                       usage['completionTokens'] as int?;
-                // 调试：打印收到的真实 token 数据
-                print('📊 收到真实Token: prompt=$realPromptTokens, completion=$realCompletionTokens');
-              }
-              
-              // 解析内容
-              final choices = json['choices'] as List?;
 
-              if (choices != null && choices.isNotEmpty) {
                 final delta = choices[0]['delta'];
                 if (delta != null) {
                   // 先处理思维链 (reasoning_content)
@@ -431,9 +426,19 @@ class ApiService {
         throw Exception(lastError);
       }
 
+      // 1. 新增缓冲区
+      String buffer = '';
+
       await for (var chunk in response.stream.transform(utf8.decoder)) {
-        final lines = chunk.split('\n');
-        for (var line in lines) {
+        // 2. 累加数据
+        buffer += chunk;
+        
+        // 3. 处理完整行
+        while (buffer.contains('\n')) {
+          final index = buffer.indexOf('\n');
+          final line = buffer.substring(0, index).trim();
+          buffer = buffer.substring(index + 1);
+
           if (line.startsWith('data: ')) {
             final data = line.substring(6).trim();
             if (data == '[DONE]') {
@@ -446,10 +451,7 @@ class ApiService {
             if (data.isNotEmpty) {
               try {
                 final json = jsonDecode(data);
-                final delta = json['choices']?[0]?['delta'];
-                if (delta != null) {
-                  // 先处理思维链
-                  final reasoning = delta['reasoning_content'] ?? delta['reasoning'];
+
                   if (reasoning != null && reasoning.isNotEmpty) {
                     if (!reasoningStarted) {
                       yield '<think>';
