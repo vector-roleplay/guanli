@@ -261,12 +261,16 @@ class _DatabaseScreenState extends State<DatabaseScreen> {
     setState(() => _isLoading = true);
     final content = await GitHubService.instance.getFileContent(repo, file.path);
     if (content != null) {
-      await DatabaseService.instance.importGitHubFile(file.path, content);
+      // 提取仓库名作为根目录
+      final repoName = repo.split('/').last;
+      final fullPath = '$repoName/${file.path}';
+      await DatabaseService.instance.importGitHubFile(fullPath, content);
       await _loadData();
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('已导入 ${file.name}')));
     }
     setState(() => _isLoading = false);
   }
+
 
   Future<void> _importGitHubDirectory(String repo, String path) async {
     setState(() => _isLoading = true);
@@ -288,18 +292,23 @@ class _DatabaseScreenState extends State<DatabaseScreen> {
         return;
       }
       
+      // 提取仓库名作为根目录
+      final repoName = repo.split('/').last;
+      
       // 统计
       int textCount = 0;
       int binaryCount = 0;
       
       // 批量导入文件
       for (var entry in files.entries) {
+        // 给每个文件路径添加仓库名前缀
+        final fullPath = '$repoName/${entry.key}';
         if (entry.value != null) {
-          await DatabaseService.instance.importGitHubFile(entry.key, entry.value!);
+          await DatabaseService.instance.importGitHubFile(fullPath, entry.value!);
           textCount++;
         } else {
           // 二进制文件也记录路径（content 为空字符串）
-          await DatabaseService.instance.importGitHubFile(entry.key, '');
+          await DatabaseService.instance.importGitHubFile(fullPath, '');
           binaryCount++;
         }
       }
@@ -307,6 +316,7 @@ class _DatabaseScreenState extends State<DatabaseScreen> {
       await _loadData();
       
       String msg = '已导入 $textCount 个文本文件';
+
       if (binaryCount > 0) {
         msg += '，$binaryCount 个二进制文件（仅路径）';
       }
