@@ -52,11 +52,14 @@ class _SubChatScreenState extends State<SubChatScreen> {
   final ItemScrollController _altScrollController = ItemScrollController();
   final ItemPositionsListener _altPositionsListener = ItemPositionsListener.create();
   final ScrollOffsetController _altScrollOffsetController = ScrollOffsetController();
-  // 备用视口是否激活（只在特定场景临时启用）
+  // 备用视口是否激活（控制是否创建）
   bool _isAltViewportActive = false;
+  // 是否显示备用视口（控制切换时机）
+  bool _showAltViewport = false;
 
   
   late SubConversation _subConversation;
+
 
   bool _isLoading = false;
   bool _stopRequested = false;
@@ -133,8 +136,11 @@ class _SubChatScreenState extends State<SubChatScreen> {
     
     final messageCount = _subConversation.messages.length;
     
-    // 激活备用视口
-    setState(() => _isAltViewportActive = true);
+    // 第一步：创建备用视口（透明状态），主视口仍显示
+    setState(() {
+      _isAltViewportActive = true;
+      _showAltViewport = false;
+    });
     
     // 等备用视口构建完成
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -146,39 +152,53 @@ class _SubChatScreenState extends State<SubChatScreen> {
         return;
       }
       
-      // 备用视口跳到最后一条消息
+      // 备用视口跳到最后一条消息，开始渲染
       _altScrollController.jumpTo(index: messageCount - 1);
       
-      // 主视口也跳到最后一条消息
-      if (_itemScrollController.isAttached) {
-        _itemScrollController.jumpTo(index: messageCount - 1);
-      }
-      
-      // 等待渲染完成
+      // 等待备用视口渲染完成
       WidgetsBinding.instance.addPostFrameCallback((_) {
         // 备用视口跳到物理底边
         if (_altScrollController.isAttached) {
           _altScrollController.scrollToEnd();
         }
         
-        // 主视口也跳到物理底边
-        if (_itemScrollController.isAttached) {
-          _itemScrollController.scrollToEnd();
-        }
-        
-        // 等待完成，切换回主视口
+        // 第二步：备用视口准备好了，切换显示
         WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted) {
-            setState(() {
-              _isAltViewportActive = false;
-              _isListReady = true;
-              _isNearBottom = true;
+          if (!mounted) return;
+          setState(() {
+            _showAltViewport = true;
+            _isListReady = true;
+          });
+          
+          // 第三步：主视口开始操作
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (_itemScrollController.isAttached) {
+              _itemScrollController.jumpTo(index: messageCount - 1);
+            }
+            
+            // 等待主视口渲染完成
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (_itemScrollController.isAttached) {
+                _itemScrollController.scrollToEnd();
+              }
+              
+              // 第四步：切换回主视口，销毁备用视口
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (mounted) {
+                  setState(() {
+                    _isAltViewportActive = false;
+                    _showAltViewport = false;
+                    _isNearBottom = true;
+                  });
+                }
+              });
             });
-          }
+          });
         });
       });
     });
   }
+
 
   void _onPositionsChange() {
     // 备用视口激活时不处理位置变化
@@ -244,15 +264,17 @@ class _SubChatScreenState extends State<SubChatScreen> {
       setState(() => _isListReady = true);
     }
   }
-
   /// 强制滚动到底部（使用备用视口策略）
   void _forceScrollToBottom() {
     if (_subConversation.messages.isEmpty) return;
     
     final messageCount = _subConversation.messages.length;
     
-    // 激活备用视口
-    setState(() => _isAltViewportActive = true);
+    // 第一步：创建备用视口（透明状态）
+    setState(() {
+      _isAltViewportActive = true;
+      _showAltViewport = false;
+    });
     
     // 等备用视口构建完成
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -267,6 +289,7 @@ class _SubChatScreenState extends State<SubChatScreen> {
             if (mounted) {
               setState(() {
                 _isAltViewportActive = false;
+                _showAltViewport = false;
                 _isNearBottom = true;
               });
             }
@@ -275,38 +298,50 @@ class _SubChatScreenState extends State<SubChatScreen> {
         return;
       }
       
-      // 备用视口跳到最后一条消息
+      // 备用视口跳到最后一条消息，开始渲染
       _altScrollController.jumpTo(index: messageCount - 1);
       
-      // 主视口也跳到最后一条消息
-      if (_itemScrollController.isAttached) {
-        _itemScrollController.jumpTo(index: messageCount - 1);
-      }
-      
-      // 等待渲染完成
+      // 等待备用视口渲染完成
       WidgetsBinding.instance.addPostFrameCallback((_) {
         // 备用视口跳到物理底边
         if (_altScrollController.isAttached) {
           _altScrollController.scrollToEnd();
         }
         
-        // 主视口也跳到物理底边
-        if (_itemScrollController.isAttached) {
-          _itemScrollController.scrollToEnd();
-        }
-        
-        // 等待完成，切换回主视口
+        // 第二步：备用视口准备好了，切换显示
         WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted) {
-            setState(() {
-              _isAltViewportActive = false;
-              _isNearBottom = true;
+          if (!mounted) return;
+          setState(() => _showAltViewport = true);
+          
+          // 第三步：主视口开始操作
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (_itemScrollController.isAttached) {
+              _itemScrollController.jumpTo(index: messageCount - 1);
+            }
+            
+            // 等待主视口渲染完成
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (_itemScrollController.isAttached) {
+                _itemScrollController.scrollToEnd();
+              }
+              
+              // 第四步：切换回主视口，销毁备用视口
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (mounted) {
+                  setState(() {
+                    _isAltViewportActive = false;
+                    _showAltViewport = false;
+                    _isNearBottom = true;
+                  });
+                }
+              });
             });
-          }
+          });
         });
       });
     });
   }
+
 
   void _scrollToTop() {
     if (_subConversation.messages.isEmpty) return;
@@ -873,9 +908,9 @@ class _SubChatScreenState extends State<SubChatScreen> {
                             children: [
                               // 主视口 - 始终存在
                               Opacity(
-                                opacity: _isAltViewportActive ? 0.0 : 1.0,
+                                opacity: (_isAltViewportActive && _showAltViewport) ? 0.0 : 1.0,
                                 child: IgnorePointer(
-                                  ignoring: _isAltViewportActive,
+                                  ignoring: _isAltViewportActive && _showAltViewport,
                                   child: _buildMessageList(
                                     controller: _itemScrollController,
                                     positionsListener: _itemPositionsListener,
@@ -885,13 +920,17 @@ class _SubChatScreenState extends State<SubChatScreen> {
                               ),
                               // 备用视口 - 只在激活时创建（1屏无缓存）
                               if (_isAltViewportActive)
-                                _buildMessageList(
-                                  controller: _altScrollController,
-                                  positionsListener: _altPositionsListener,
-                                  offsetController: _altScrollOffsetController,
-                                  minCacheExtent: 0,
+                                Opacity(
+                                  opacity: _showAltViewport ? 1.0 : 0.0,
+                                  child: _buildMessageList(
+                                    controller: _altScrollController,
+                                    positionsListener: _altPositionsListener,
+                                    offsetController: _altScrollOffsetController,
+                                    minCacheExtent: 0,
+                                  ),
                                 ),
                             ],
+
                           ),
                         ),
                       ),
