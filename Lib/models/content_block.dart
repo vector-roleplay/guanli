@@ -70,9 +70,9 @@ class StreamingBlockBuilder {
   
   /// 获取当前块的内容
   String get currentBlockContent => _currentBlock.toString();
-  
-  /// 总块数
-  int get blockCount => completedBlocks.length + (_currentBlock.isNotEmpty ? 1 : 0);
+  /// 总块数（流式消息始终至少有1个块，用于显示加载状态）
+  int get blockCount => completedBlocks.length + 1;
+
   
   /// 获取指定块的内容
   String getBlockContent(int index) {
