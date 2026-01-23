@@ -1,3 +1,4 @@
+
 // Copyright 2019 The Fuchsia Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
@@ -59,6 +60,7 @@ class PositionedList extends StatefulWidget {
   @override
   State<StatefulWidget> createState() => _PositionedListState();
 }
+
 class _PositionedListState extends State<PositionedList> {
   final Key _centerKey = UniqueKey();
 
@@ -67,7 +69,7 @@ class _PositionedListState extends State<PositionedList> {
 
   bool updateScheduled = false;
 
-  /// 【新增】安全的 positionedIndex，确保不越界
+  /// 【修复】安全的 positionedIndex，确保不越界
   int get _safePositionedIndex {
     if (widget.itemCount == 0) return 0;
     return widget.positionedIndex.clamp(0, widget.itemCount - 1);
@@ -75,7 +77,6 @@ class _PositionedListState extends State<PositionedList> {
 
   @override
   void initState() {
-
     super.initState();
     scrollController = widget.controller ?? ScrollController();
     scrollController.addListener(_schedulePositionNotificationUpdate);
@@ -93,6 +94,7 @@ class _PositionedListState extends State<PositionedList> {
     super.didUpdateWidget(oldWidget);
     _schedulePositionNotificationUpdate();
   }
+
   @override
   Widget build(BuildContext context) {
     // 【修复】使用安全索引，防止越界
@@ -168,7 +170,6 @@ class _PositionedListState extends State<PositionedList> {
         ),
       );
   }
-
 
   Widget _buildSeparatedListElement(int index) {
     if (index.isEven) {
