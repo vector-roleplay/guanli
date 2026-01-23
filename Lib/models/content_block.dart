@@ -1,3 +1,4 @@
+
 // lib/models/content_block.dart
 
 /// 内容块 - 渲染的最小单位
@@ -18,6 +19,7 @@ class StreamingBlockBuilder {
   final String messageId;
   final List<String> completedBlocks = [];  // 已完成的块内容
   final StringBuffer _currentBlock = StringBuffer();  // 正在增长的块
+  bool _finalized = false;  // 新增：标记是否已完成
   
   /// 每块的目标字符数（约 0.8 屏，留余量）
   static const int charsPerBlock = 1500;
@@ -29,6 +31,7 @@ class StreamingBlockBuilder {
   
   /// 追加新内容
   void append(String chunk) {
+    if (_finalized) return;  // 已完成则忽略后续追加
     _currentBlock.write(chunk);
     _trySplit();
   }
@@ -70,17 +73,27 @@ class StreamingBlockBuilder {
   
   /// 获取当前块的内容
   String get currentBlockContent => _currentBlock.toString();
-  /// 总块数（流式消息始终至少有1个块，用于显示加载状态）
-  int get blockCount => completedBlocks.length + 1;
-
+  
+  /// 总块数
+  int get blockCount {
+    if (_finalized) {
+      // 已完成：精确数量
+      return completedBlocks.length;
+    }
+    // 流式进行中：已完成块 + 正在增长的块（至少1个用于显示加载状态）
+    return completedBlocks.length + 1;
+  }
   
   /// 获取指定块的内容
   String getBlockContent(int index) {
     if (index < completedBlocks.length) {
       return completedBlocks[index];
-    } else if (index == completedBlocks.length && _currentBlock.isNotEmpty) {
+    }
+    // 只有流式进行中才有"当前块"
+    if (!_finalized && index == completedBlocks.length) {
       return _currentBlock.toString();
     }
+    // 越界或已完成后访问不存在的块，返回空
     return '';
   }
   
@@ -92,10 +105,26 @@ class StreamingBlockBuilder {
   
   /// 完成流式，获取所有块
   List<ContentBlock> finalize() {
+    if (_finalized) {
+      // 防止重复调用
+      return List.generate(completedBlocks.length, (index) => ContentBlock(
+        messageId: messageId,
+        partIndex: index,
+        content: completedBlocks[index],
+      ));
+    }
+    
+    _finalized = true;  // 标记为已完成
+    
     // 把当前块也加入已完成列表
     if (_currentBlock.isNotEmpty) {
       completedBlocks.add(_currentBlock.toString());
       _currentBlock.clear();
+    }
+    
+    // 如果没有任何内容，创建一个空块（避免空列表导致问题）
+    if (completedBlocks.isEmpty) {
+      completedBlocks.add('');
     }
     
     return List.generate(completedBlocks.length, (index) => ContentBlock(
@@ -104,6 +133,9 @@ class StreamingBlockBuilder {
       content: completedBlocks[index],
     ));
   }
+  
+  /// 是否已完成
+  bool get isFinalized => _finalized;
   
   /// 从完整内容创建块列表（用于非流式消息）
   static List<ContentBlock> fromContent(String messageId, String content) {
