@@ -360,10 +360,8 @@ class _MainChatScreenState extends State<MainChatScreen> {
       });
     });
   }
-
-
   void _scrollToTop() {
-    if (_currentConversation == null || _currentConversation!.messages.isEmpty) return;
+    if (_currentConversation == null || _blockManager.totalBlockCount == 0) return;
     
     // 只用主视口
     if (!_itemScrollController.isAttached) return;
@@ -371,6 +369,7 @@ class _MainChatScreenState extends State<MainChatScreen> {
     _itemScrollController.scrollToStart();
   }
   void _scrollToPreviousMessage() {
+
     if (_currentConversation == null || _blockManager.totalBlockCount == 0) return;
     
     // 只用主视口
@@ -1090,12 +1089,13 @@ class _MainChatScreenState extends State<MainChatScreen> {
       final cleanResponse = MessageDetector.removeThinkingContent(response);
       final subConv = await SubConversationService.instance.create(parentId: _currentConversation!.id, rootConversationId: _currentConversation!.id, level: 1);
       final result = await Navigator.push<Map<String, dynamic>>(context, MaterialPageRoute(builder: (context) => SubChatScreen(subConversation: subConv, initialMessage: cleanResponse, requestedPaths: paths, directoryTree: _directoryTree)));
-
       if (result != null && result['message'] != null && result['message'].isNotEmpty) {
         final returnMessage = result['message'] as String;
         final infoMessage = Message(role: MessageRole.user, content: '【来自子界面的提取结果】\n$returnMessage', status: MessageStatus.sent);
+        infoMessage.initBlocks();
         _currentConversation!.messages.add(infoMessage);
         await ConversationService.instance.update(_currentConversation!);
+        _updateBlockManager();
         setState(() {});
         _scrollToBottom();
         await _sendMessageToAI();
@@ -1110,8 +1110,10 @@ class _MainChatScreenState extends State<MainChatScreen> {
     if (result != null && result['message'] != null && result['message'].isNotEmpty && subConv.level == 1) {
       final returnMessage = result['message'] as String;
       final infoMessage = Message(role: MessageRole.user, content: '【来自子界面的提取结果】\n$returnMessage', status: MessageStatus.sent);
+      infoMessage.initBlocks();
       _currentConversation!.messages.add(infoMessage);
       await ConversationService.instance.update(_currentConversation!);
+      _updateBlockManager();
       setState(() {});
       _scrollToBottom();
       await _sendMessageToAI();
@@ -1119,6 +1121,7 @@ class _MainChatScreenState extends State<MainChatScreen> {
     setState(() {});
   }
   void _clearCurrentChat() {
+
     showDialog(context: context, builder: (ctx) => AlertDialog(
       title: const Text('清空对话'), content: const Text('确定要清空当前对话记录吗？'),
       actions: [
@@ -1126,6 +1129,7 @@ class _MainChatScreenState extends State<MainChatScreen> {
         TextButton(onPressed: () async {
           _currentConversation?.messages.clear();
           await ConversationService.instance.update(_currentConversation!);
+          _updateBlockManager();
           Navigator.pop(ctx);
           setState(() {
             _isAltViewportActive = false;
@@ -1141,6 +1145,7 @@ class _MainChatScreenState extends State<MainChatScreen> {
 
 
   void _deleteConversation(Conversation conversation) {
+
     showDialog(context: context, builder: (ctx) => AlertDialog(
       title: const Text('删除会话'), content: Text('确定要删除「${conversation.title}」吗？\n\n注意：该会话的独立数据库也将被删除'),
       actions: [
@@ -1155,6 +1160,7 @@ class _MainChatScreenState extends State<MainChatScreen> {
             if (ConversationService.instance.conversations.isNotEmpty) {
               setState(() {
                 _currentConversation = ConversationService.instance.conversations.first;
+                _updateBlockManager();
                 _isAltViewportActive = false;
                 _showAltViewport = false;
                 _isListReady = false;
@@ -1165,6 +1171,7 @@ class _MainChatScreenState extends State<MainChatScreen> {
               });
 
             } else {
+
               await _createNewConversation();
               setState(() {});
             }
