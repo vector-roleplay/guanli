@@ -411,29 +411,6 @@ class _MainChatScreenState extends State<MainChatScreen> {
     );
   }
 
-
-  void _scrollToNextMessage() {
-    if (_currentConversation == null || _currentConversation!.messages.isEmpty) return;
-    
-    // 只用主视口
-    if (!_itemScrollController.isAttached) return;
-    
-    final positions = _itemPositionsListener.itemPositions.value;
-    if (positions.isEmpty) return;
-    
-    // 找到顶部的消息，跳到它的下一条
-    final minVisible = positions.reduce((a, b) => a.index < b.index ? a : b);
-    final targetIndex = (minVisible.index + 1).clamp(0, _currentConversation!.messages.length - 1);
-    
-    _itemScrollController.scrollTo(
-      index: targetIndex,
-      duration: const Duration(milliseconds: 300),
-      curve: Curves.easeOut,
-      alignment: 0.0,
-    );
-  }
-  // 构建块列表（复用代码）
-
   Widget _buildMessageList({
     required ItemScrollController controller,
     required ItemPositionsListener positionsListener,
@@ -507,19 +484,6 @@ class _MainChatScreenState extends State<MainChatScreen> {
       },
     );
   }
-
-        
-        return MessageBubble(
-          message: message,
-          onRetry: message.status == MessageStatus.error ? () => _sendMessage(message.content, message.attachments) : null,
-          onDelete: () => _deleteMessage(index),
-          onRegenerate: message.role == MessageRole.assistant && message.status == MessageStatus.sent ? () => _regenerateMessage(index) : null,
-          onEdit: message.role == MessageRole.user && message.status == MessageStatus.sent ? () => _editMessage(index) : null,
-        );
-      },
-    );
-  }
-  Future<void> _deleteMessage(int index) async {
     if (_currentConversation == null || index < 0) return;
     _currentConversation!.messages.removeAt(index);
     await ConversationService.instance.update(_currentConversation!);
