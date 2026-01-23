@@ -153,12 +153,17 @@ class _MainChatScreenState extends State<MainChatScreen> {
   }
   /// 使用备用视口策略滚动到底部（用于初始化、切换会话）
   void _scrollToBottomWithAltViewport() {
-    if (_currentConversation == null || _blockManager.totalBlockCount == 0) {
+    if (_currentConversation == null || !_blockManager.hasBlocks) {
       if (mounted) setState(() => _isListReady = true);
       return;
     }
     
     final lastBlockIndex = _blockManager.lastBlockIndex;
+    if (lastBlockIndex < 0) {
+      if (mounted) setState(() => _isListReady = true);
+      return;
+    }
+
 
     
     // 第一步：创建备用视口（透明状态），主视口仍显示
@@ -247,10 +252,13 @@ class _MainChatScreenState extends State<MainChatScreen> {
     final conversation = await ConversationService.instance.create();
     setState(() {
       _currentConversation = conversation;
+      _updateBlockManager();  // 同步块管理器状态
       _isAltViewportActive = false;
       _showAltViewport = false;
+      _isListReady = true;  // 新会话直接显示（无需滚动）
     });
   }
+
   void _switchConversation(Conversation conversation) {
     setState(() {
       _currentConversation = conversation;
@@ -267,25 +275,32 @@ class _MainChatScreenState extends State<MainChatScreen> {
       _scrollToBottomWithAltViewport();
     });
   }
-
   // 正常列表：index 0 = 最旧消息（顶部），index max = 最新消息（底部）
   void _scrollToBottom() {
-    if (_currentConversation == null || _blockManager.totalBlockCount == 0) return;
+    if (_currentConversation == null || !_blockManager.hasBlocks) return;
     
     // 只用主视口
     if (!_itemScrollController.isAttached) return;
     
-    _itemScrollController.scrollToEnd();
+    // 延迟一帧确保 UI 已重建
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_itemScrollController.isAttached) return;
+      _itemScrollController.scrollToEnd();
+    });
+    
     // 确保列表可见（用于发送消息后的滚动）
     if (!_isListReady && mounted) {
       setState(() => _isListReady = true);
     }
   }
+
   /// 强制滚动到底部（使用备用视口策略）
   void _forceScrollToBottom() {
-    if (_currentConversation == null || _blockManager.totalBlockCount == 0) return;
+    if (_currentConversation == null || !_blockManager.hasBlocks) return;
     
     final lastBlockIndex = _blockManager.lastBlockIndex;
+    if (lastBlockIndex < 0) return;
+
 
     
     // 第一步：创建备用视口（透明状态）
@@ -361,7 +376,7 @@ class _MainChatScreenState extends State<MainChatScreen> {
     });
   }
   void _scrollToTop() {
-    if (_currentConversation == null || _blockManager.totalBlockCount == 0) return;
+    if (_currentConversation == null || !_blockManager.hasBlocks) return;
     
     // 只用主视口
     if (!_itemScrollController.isAttached) return;
@@ -369,8 +384,7 @@ class _MainChatScreenState extends State<MainChatScreen> {
     _itemScrollController.scrollToStart();
   }
   void _scrollToPreviousMessage() {
-
-    if (_currentConversation == null || _blockManager.totalBlockCount == 0) return;
+    if (_currentConversation == null || !_blockManager.hasBlocks) return;
     
     // 只用主视口
     if (!_itemScrollController.isAttached) return;
@@ -378,8 +392,12 @@ class _MainChatScreenState extends State<MainChatScreen> {
     final positions = _itemPositionsListener.itemPositions.value;
     if (positions.isEmpty) return;
     
+    final lastIndex = _blockManager.lastBlockIndex;
+    if (lastIndex < 0) return;
+    
     final minVisible = positions.reduce((a, b) => a.index < b.index ? a : b);
-    final targetIndex = (minVisible.index - 1).clamp(0, _blockManager.lastBlockIndex);
+    final targetIndex = (minVisible.index - 1).clamp(0, lastIndex);
+
     
     _itemScrollController.scrollTo(
       index: targetIndex,
@@ -388,9 +406,8 @@ class _MainChatScreenState extends State<MainChatScreen> {
       alignment: 0.0,
     );
   }
-
   void _scrollToNextMessage() {
-    if (_currentConversation == null || _blockManager.totalBlockCount == 0) return;
+    if (_currentConversation == null || !_blockManager.hasBlocks) return;
     
     // 只用主视口
     if (!_itemScrollController.isAttached) return;
@@ -398,9 +415,13 @@ class _MainChatScreenState extends State<MainChatScreen> {
     final positions = _itemPositionsListener.itemPositions.value;
     if (positions.isEmpty) return;
     
+    final lastIndex = _blockManager.lastBlockIndex;
+    if (lastIndex < 0) return;
+    
     // 找到顶部的块，跳到下一个
     final minVisible = positions.reduce((a, b) => a.index < b.index ? a : b);
-    final targetIndex = (minVisible.index + 1).clamp(0, _blockManager.lastBlockIndex);
+    final targetIndex = (minVisible.index + 1).clamp(0, lastIndex);
+
     
     _itemScrollController.scrollTo(
       index: targetIndex,
@@ -1226,8 +1247,9 @@ class _MainChatScreenState extends State<MainChatScreen> {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
-    final hasBlocks = _currentConversation != null && _blockManager.totalBlockCount > 0;
+    final hasBlocks = _currentConversation != null && _blockManager.hasBlocks;
     return Scaffold(
+
 
       key: _scaffoldKey,
       appBar: AppBar(
