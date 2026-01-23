@@ -1,8 +1,10 @@
+
 // lib/models/message.dart
 
 import 'dart:convert';
 import 'dart:io';
 import 'package:uuid/uuid.dart';
+import 'content_block.dart';
 
 enum MessageRole { user, assistant, system }
 
@@ -13,7 +15,7 @@ class TokenUsage {
   final int completionTokens;
   final int totalTokens;
   final double duration;
-  final bool isRealUsage;  // 是否是API返回的真实数据
+  final bool isRealUsage;
   
   TokenUsage({
     this.promptTokens = 0,
@@ -22,7 +24,6 @@ class TokenUsage {
     this.duration = 0,
     this.isRealUsage = false,
   });
-
 
   double get tokensPerSecond {
     if (duration <= 0) return 0;
@@ -44,7 +45,6 @@ class TokenUsage {
     duration: (json['duration'] ?? 0).toDouble(),
     isRealUsage: json['isRealUsage'] ?? false,
   );
-
 }
 
 // 内嵌文件数据（用于显示，不发送给API）
@@ -73,22 +73,21 @@ class EmbeddedFile {
     size: json['size'] ?? 0,
   );
 }
-import 'content_block.dart';
 
 class Message {
   final String id;
   final MessageRole role;
-  final String content;  // 显示用的简短内容
-  final String? fullContent;  // 完整内容（发送给API）
+  final String content;
+  final String? fullContent;
   final DateTime timestamp;
   final List<FileAttachment> attachments;
-  final List<EmbeddedFile> embeddedFiles;  // 内嵌文件
+  final List<EmbeddedFile> embeddedFiles;
   MessageStatus status;
   TokenUsage? tokenUsage;
   
   // 分块相关
-  int blockStartIndex = 0;  // 这条消息的第一个块在全局的位置
-  List<ContentBlock> blocks = [];  // 这条消息的所有块
+  int blockStartIndex = 0;
+  List<ContentBlock> blocks = [];
   
   int get blockCount => blocks.isEmpty ? 1 : blocks.length;
   int get blockEndIndex => blockStartIndex + blockCount - 1;
@@ -114,7 +113,6 @@ class Message {
       blocks = StreamingBlockBuilder.fromContent(id, content);
     }
   }
-
 
   // 获取发送给API的内容
   String get apiContent => fullContent ?? content;
