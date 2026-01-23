@@ -268,7 +268,6 @@ class _ScrollablePositionedListState extends State<ScrollablePositionedList>
     _animationController?.dispose();
     super.dispose();
   }
-
   @override
   void didUpdateWidget(ScrollablePositionedList oldWidget) {
     super.didUpdateWidget(oldWidget);
@@ -280,24 +279,22 @@ class _ScrollablePositionedListState extends State<ScrollablePositionedList>
       widget.itemScrollController?._attach(this);
     }
 
+    // 【修复】直接修改值，不用 setState
+    // 因为 didUpdateWidget 之后紧接着就是 build()
+    // setState 要等下一帧才生效，来不及
     if (widget.itemCount == 0) {
-      setState(() {
-        primary.target = 0;
-        secondary.target = 0;
-      });
+      primary.target = 0;
+      secondary.target = 0;
     } else {
       if (primary.target > widget.itemCount - 1) {
-        setState(() {
-          primary.target = widget.itemCount - 1;
-        });
+        primary.target = widget.itemCount - 1;
       }
       if (secondary.target > widget.itemCount - 1) {
-        setState(() {
-          secondary.target = widget.itemCount - 1;
-        });
+        secondary.target = widget.itemCount - 1;
       }
     }
   }
+
 
   @override
   Widget build(BuildContext context) {
