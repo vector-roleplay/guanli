@@ -1,3 +1,4 @@
+
 // Lib/screens/main_chat_screen.dart
 
 import 'dart:async';
@@ -5,6 +6,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
 import '../models/message.dart';
+import '../models/content_block.dart';
 
 import '../models/conversation.dart';
 import '../models/sub_conversation.dart';
@@ -13,7 +15,8 @@ import '../services/api_service.dart';
 import '../services/database_service.dart';
 import '../services/conversation_service.dart';
 import '../services/sub_conversation_service.dart';
-import '../widgets/message_bubble.dart';
+import '../services/block_manager.dart';
+import '../widgets/block_widget.dart';
 import '../widgets/chat_input.dart';
 import '../widgets/scroll_buttons.dart';
 import '../utils/message_detector.dart';
@@ -50,6 +53,8 @@ class _MainChatScreenState extends State<MainChatScreen> {
   // 是否显示备用视口（控制切换时机）
   bool _showAltViewport = false;
 
+  // 块管理器
+  final BlockManager _blockManager = BlockManager();
   
   String _directoryTree = '';
 
@@ -64,12 +69,13 @@ class _MainChatScreenState extends State<MainChatScreen> {
   bool _isListReady = false;  // 列表渲染并跳转完成后才显示
 
   
-  // 流式消息专用 - 避免整个列表重建
-  final ValueNotifier<String> _streamingContent = ValueNotifier('');
+  // 流式消息专用 - 使用块索引更新
+  final ValueNotifier<int> _streamingBlockCount = ValueNotifier(0);
   String? _streamingMessageId;
   
   DateTime _lastUIUpdate = DateTime.now();
   static const Duration _uiUpdateInterval = Duration(milliseconds: 200);
+
 
 
   @override
