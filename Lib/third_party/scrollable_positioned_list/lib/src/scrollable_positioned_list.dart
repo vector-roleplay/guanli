@@ -1,3 +1,4 @@
+
 // Copyright 2019 The Fuchsia Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
@@ -268,6 +269,7 @@ class _ScrollablePositionedListState extends State<ScrollablePositionedList>
     _animationController?.dispose();
     super.dispose();
   }
+
   @override
   void didUpdateWidget(ScrollablePositionedList oldWidget) {
     super.didUpdateWidget(oldWidget);
@@ -280,8 +282,8 @@ class _ScrollablePositionedListState extends State<ScrollablePositionedList>
     }
 
     // 【修复】直接修改值，不用 setState
-    // 因为 didUpdateWidget 之后紧接着就是 build()
-    // setState 要等下一帧才生效，来不及
+    // 原因：didUpdateWidget 之后紧接着就是 build()
+    // setState 要等下一帧才生效，会导致 build 用到错误的 target
     if (widget.itemCount == 0) {
       primary.target = 0;
       secondary.target = 0;
@@ -294,7 +296,6 @@ class _ScrollablePositionedListState extends State<ScrollablePositionedList>
       }
     }
   }
-
 
   @override
   Widget build(BuildContext context) {
