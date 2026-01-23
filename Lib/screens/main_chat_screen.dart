@@ -484,6 +484,8 @@ class _MainChatScreenState extends State<MainChatScreen> {
       },
     );
   }
+
+  Future<void> _deleteMessage(int index) async {
     if (_currentConversation == null || index < 0) return;
     _currentConversation!.messages.removeAt(index);
     await ConversationService.instance.update(_currentConversation!);
@@ -493,6 +495,7 @@ class _MainChatScreenState extends State<MainChatScreen> {
 
 
   Future<void> _editMessage(int index) async {
+
 
     if (_currentConversation == null) return;
     final message = _currentConversation!.messages[index];
