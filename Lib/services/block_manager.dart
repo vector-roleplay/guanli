@@ -118,15 +118,18 @@ class BlockManager {
     }
     return 0;
   }
-  
   /// 获取消息索引对应的块索引
   int getBlockIndexForMessageIndex(int messageIndex) {
-    if (messageIndex < 0 || messageIndex >= _messages.length) return 0;
+    if (messageIndex < 0 || messageIndex >= _messages.length) return -1;
     return _messages[messageIndex].blockStartIndex;
   }
   
-  /// 获取最后一个块的索引
-  int get lastBlockIndex => totalBlockCount > 0 ? totalBlockCount - 1 : 0;
+  /// 获取最后一个块的索引（返回 -1 表示没有块）
+  int get lastBlockIndex => totalBlockCount > 0 ? totalBlockCount - 1 : -1;
+  
+  /// 是否有块
+  bool get hasBlocks => totalBlockCount > 0;
+
   
   // ========== 流式支持 ==========
   
