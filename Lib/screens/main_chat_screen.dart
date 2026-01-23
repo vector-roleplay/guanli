@@ -423,12 +423,21 @@ class _MainChatScreenState extends State<MainChatScreen> {
       itemPositionsListener: positionsListener,
       scrollOffsetController: offsetController,
       padding: const EdgeInsets.symmetric(vertical: 16),
-      itemCount: _blockManager.totalBlockCount,
-      itemBuilder: (context, blockIndex) {
+    itemCount: _blockManager.totalBlockCount,
+    itemBuilder: (context, blockIndex) {
+      try {
         final located = _blockManager.locateBlock(blockIndex);
-        if (located == null) return const SizedBox();
+        if (located == null) {
+          print('❌ locateBlock 返回 null: blockIndex=$blockIndex, totalCount=${_blockManager.totalBlockCount}');
+          return Container(
+            color: Colors.purple,
+            height: 50,
+            child: Text('NULL: $blockIndex', style: const TextStyle(color: Colors.white)),
+          );
+        }
         
         final (message, localIndex) = located;
+
         final isFirst = _blockManager.isFirstBlock(blockIndex);
         final isLast = _blockManager.isLastBlock(blockIndex);
         final isStreaming = _blockManager.isStreaming(message.id);
@@ -476,13 +485,28 @@ class _MainChatScreenState extends State<MainChatScreen> {
           onRegenerate: isLast && message.role == MessageRole.assistant && message.status == MessageStatus.sent 
               ? () => _regenerateMessage(messageIndex) 
               : null,
-          onEdit: isLast && message.role == MessageRole.user && message.status == MessageStatus.sent 
-              ? () => _editMessage(messageIndex) 
-              : null,
+        onEdit: isLast && message.role == MessageRole.user && message.status == MessageStatus.sent 
+            ? () => _editMessage(messageIndex) 
+            : null,
+      );
+      } catch (e, stack) {
+        print('❌ BlockWidget 构建错误: $e');
+        print('   blockIndex=$blockIndex, totalCount=${_blockManager.totalBlockCount}');
+        print('   $stack');
+        return Container(
+          color: Colors.orange,
+          height: 80,
+          padding: const EdgeInsets.all(8),
+          child: Text(
+            'ERROR: $blockIndex\n$e',
+            style: const TextStyle(color: Colors.white, fontSize: 10),
+          ),
         );
-      },
-    );
-  }
+      }
+    },
+  );
+}
+
 
   Future<void> _deleteMessage(int index) async {
     if (_currentConversation == null || index < 0) return;
