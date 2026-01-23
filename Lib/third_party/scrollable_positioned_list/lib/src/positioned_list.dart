@@ -59,7 +59,6 @@ class PositionedList extends StatefulWidget {
   @override
   State<StatefulWidget> createState() => _PositionedListState();
 }
-
 class _PositionedListState extends State<PositionedList> {
   final Key _centerKey = UniqueKey();
 
@@ -68,8 +67,15 @@ class _PositionedListState extends State<PositionedList> {
 
   bool updateScheduled = false;
 
+  /// 【新增】安全的 positionedIndex，确保不越界
+  int get _safePositionedIndex {
+    if (widget.itemCount == 0) return 0;
+    return widget.positionedIndex.clamp(0, widget.itemCount - 1);
+  }
+
   @override
   void initState() {
+
     super.initState();
     scrollController = widget.controller ?? ScrollController();
     scrollController.addListener(_schedulePositionNotificationUpdate);
@@ -87,9 +93,12 @@ class _PositionedListState extends State<PositionedList> {
     super.didUpdateWidget(oldWidget);
     _schedulePositionNotificationUpdate();
   }
-
   @override
-  Widget build(BuildContext context) => RegistryWidget(
+  Widget build(BuildContext context) {
+    // 【修复】使用安全索引，防止越界
+    final safeIndex = _safePositionedIndex;
+    
+    return RegistryWidget(
         elementNotifier: registeredElements,
         child: UnboundedCustomScrollView(
           anchor: widget.alignment,
@@ -102,18 +111,18 @@ class _PositionedListState extends State<PositionedList> {
           shrinkWrap: widget.shrinkWrap,
           semanticChildCount: widget.semanticChildCount ?? widget.itemCount,
           slivers: <Widget>[
-            if (widget.positionedIndex > 0)
+            if (safeIndex > 0)
               SliverPadding(
                 padding: _leadingSliverPadding,
                 sliver: SliverList(
                   delegate: SliverChildBuilderDelegate(
                     (context, index) => widget.separatorBuilder == null
-                        ? _buildItem(widget.positionedIndex - (index + 1))
+                        ? _buildItem(safeIndex - (index + 1))
                         : _buildSeparatedListElement(
-                            2 * widget.positionedIndex - (index + 1)),
+                            2 * safeIndex - (index + 1)),
                     childCount: widget.separatorBuilder == null
-                        ? widget.positionedIndex
-                        : 2 * widget.positionedIndex,
+                        ? safeIndex
+                        : 2 * safeIndex,
                     addSemanticIndexes: false,
                     addRepaintBoundaries: widget.addRepaintBoundaries,
                     addAutomaticKeepAlives: widget.addAutomaticKeepAlives,
@@ -126,9 +135,9 @@ class _PositionedListState extends State<PositionedList> {
               sliver: SliverList(
                 delegate: SliverChildBuilderDelegate(
                   (context, index) => widget.separatorBuilder == null
-                      ? _buildItem(index + widget.positionedIndex)
+                      ? _buildItem(index + safeIndex)
                       : _buildSeparatedListElement(
-                          index + 2 * widget.positionedIndex),
+                          index + 2 * safeIndex),
                   childCount: widget.itemCount != 0 ? 1 : 0,
                   addSemanticIndexes: false,
                   addRepaintBoundaries: widget.addRepaintBoundaries,
@@ -136,19 +145,19 @@ class _PositionedListState extends State<PositionedList> {
                 ),
               ),
             ),
-            if (widget.positionedIndex >= 0 &&
-                widget.positionedIndex < widget.itemCount - 1)
+            if (safeIndex >= 0 &&
+                safeIndex < widget.itemCount - 1)
               SliverPadding(
                 padding: _trailingSliverPadding,
                 sliver: SliverList(
                   delegate: SliverChildBuilderDelegate(
                     (context, index) => widget.separatorBuilder == null
-                        ? _buildItem(index + widget.positionedIndex + 1)
+                        ? _buildItem(index + safeIndex + 1)
                         : _buildSeparatedListElement(
-                            index + 2 * widget.positionedIndex + 1),
+                            index + 2 * safeIndex + 1),
                     childCount: widget.separatorBuilder == null
-                        ? widget.itemCount - widget.positionedIndex - 1
-                        : 2 * (widget.itemCount - widget.positionedIndex - 1),
+                        ? widget.itemCount - safeIndex - 1
+                        : 2 * (widget.itemCount - safeIndex - 1),
                     addSemanticIndexes: false,
                     addRepaintBoundaries: widget.addRepaintBoundaries,
                     addAutomaticKeepAlives: widget.addAutomaticKeepAlives,
@@ -158,6 +167,8 @@ class _PositionedListState extends State<PositionedList> {
           ],
         ),
       );
+  }
+
 
   Widget _buildSeparatedListElement(int index) {
     if (index.isEven) {
