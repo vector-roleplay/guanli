@@ -94,13 +94,22 @@ class _MainChatScreenState extends State<MainChatScreen> {
     final positions = _itemPositionsListener.itemPositions.value;
     if (positions.isEmpty || _currentConversation == null) return;
     
-    final maxIndex = _currentConversation!.messages.length - 1;
+    // 使用块索引判断是否在底部
+    final maxIndex = _blockManager.lastBlockIndex;
     final isBottomVisible = positions.any((pos) => pos.index == maxIndex);
     
     if (isBottomVisible != _isNearBottom) {
       setState(() => _isNearBottom = isBottomVisible);
     }
   }
+  
+  /// 更新块管理器
+  void _updateBlockManager() {
+    if (_currentConversation != null) {
+      _blockManager.setMessages(_currentConversation!.messages);
+    }
+  }
+
 
 
 
@@ -132,7 +141,10 @@ class _MainChatScreenState extends State<MainChatScreen> {
     if (ConversationService.instance.conversations.isEmpty) {
       await _createNewConversation();
     } else {
-      setState(() => _currentConversation = ConversationService.instance.conversations.first);
+      setState(() {
+        _currentConversation = ConversationService.instance.conversations.first;
+        _updateBlockManager();
+      });
     }
     // 初始化完成后，使用备用视口策略滚动到底部
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -141,12 +153,13 @@ class _MainChatScreenState extends State<MainChatScreen> {
   }
   /// 使用备用视口策略滚动到底部（用于初始化、切换会话）
   void _scrollToBottomWithAltViewport() {
-    if (_currentConversation == null || _currentConversation!.messages.isEmpty) {
+    if (_currentConversation == null || _blockManager.totalBlockCount == 0) {
       if (mounted) setState(() => _isListReady = true);
       return;
     }
     
-    final messageCount = _currentConversation!.messages.length;
+    final lastBlockIndex = _blockManager.lastBlockIndex;
+
     
     // 第一步：创建备用视口（透明状态），主视口仍显示
     setState(() {
@@ -163,9 +176,9 @@ class _MainChatScreenState extends State<MainChatScreen> {
         });
         return;
       }
-      
-      // 备用视口跳到最后一条消息，开始渲染
-      _altScrollController.jumpTo(index: messageCount - 1);
+      // 备用视口跳到最后一个块，开始渲染
+      _altScrollController.jumpTo(index: lastBlockIndex);
+
       
       // 等待备用视口渲染完成
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -181,12 +194,12 @@ class _MainChatScreenState extends State<MainChatScreen> {
             _showAltViewport = true;
             _isListReady = true;
           });
-          
           // 第三步：主视口开始操作（此时用户看到的是备用视口）
           WidgetsBinding.instance.addPostFrameCallback((_) {
             if (_itemScrollController.isAttached) {
-              _itemScrollController.jumpTo(index: messageCount - 1);
+              _itemScrollController.jumpTo(index: lastBlockIndex);
             }
+
             
             // 等待主视口渲染完成
             WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -210,21 +223,15 @@ class _MainChatScreenState extends State<MainChatScreen> {
       });
     });
   }
-
-
-
-
-
-
-
   @override
   void dispose() {
     _hideButtonsTimer?.cancel();
     _itemPositionsListener.itemPositions.removeListener(_onPositionsChange);
     _altPositionsListener.itemPositions.removeListener(_onPositionsChange);
-    _streamingContent.dispose();
+    _streamingBlockCount.dispose();
     super.dispose();
   }
+
 
 
 
@@ -244,10 +251,10 @@ class _MainChatScreenState extends State<MainChatScreen> {
       _showAltViewport = false;
     });
   }
-
   void _switchConversation(Conversation conversation) {
     setState(() {
       _currentConversation = conversation;
+      _updateBlockManager();
       _isListReady = false;
       _isAltViewportActive = false;
       _showAltViewport = false;
@@ -260,10 +267,10 @@ class _MainChatScreenState extends State<MainChatScreen> {
       _scrollToBottomWithAltViewport();
     });
   }
+
   // 正常列表：index 0 = 最旧消息（顶部），index max = 最新消息（底部）
-  
   void _scrollToBottom() {
-    if (_currentConversation == null || _currentConversation!.messages.isEmpty) return;
+    if (_currentConversation == null || _blockManager.totalBlockCount == 0) return;
     
     // 只用主视口
     if (!_itemScrollController.isAttached) return;
@@ -276,9 +283,10 @@ class _MainChatScreenState extends State<MainChatScreen> {
   }
   /// 强制滚动到底部（使用备用视口策略）
   void _forceScrollToBottom() {
-    if (_currentConversation == null || _currentConversation!.messages.isEmpty) return;
+    if (_currentConversation == null || _blockManager.totalBlockCount == 0) return;
     
-    final messageCount = _currentConversation!.messages.length;
+    final lastBlockIndex = _blockManager.lastBlockIndex;
+
     
     // 第一步：创建备用视口（透明状态）
     setState(() {
@@ -291,7 +299,8 @@ class _MainChatScreenState extends State<MainChatScreen> {
       if (!_altScrollController.isAttached) {
         // 备用视口未就绪，回退到普通方式
         if (_itemScrollController.isAttached) {
-          _itemScrollController.jumpTo(index: messageCount - 1);
+          _itemScrollController.jumpTo(index: lastBlockIndex);
+
           WidgetsBinding.instance.addPostFrameCallback((_) {
             if (_itemScrollController.isAttached) {
               _itemScrollController.scrollToEnd();
@@ -307,9 +316,8 @@ class _MainChatScreenState extends State<MainChatScreen> {
         }
         return;
       }
-      
-      // 备用视口跳到最后一条消息，开始渲染
-      _altScrollController.jumpTo(index: messageCount - 1);
+      // 备用视口跳到最后一个块，开始渲染
+      _altScrollController.jumpTo(index: lastBlockIndex);
       
       // 等待备用视口渲染完成
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -326,8 +334,9 @@ class _MainChatScreenState extends State<MainChatScreen> {
           // 第三步：主视口开始操作
           WidgetsBinding.instance.addPostFrameCallback((_) {
             if (_itemScrollController.isAttached) {
-              _itemScrollController.jumpTo(index: messageCount - 1);
+              _itemScrollController.jumpTo(index: lastBlockIndex);
             }
+
             
             // 等待主视口渲染完成
             WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -362,7 +371,7 @@ class _MainChatScreenState extends State<MainChatScreen> {
     _itemScrollController.scrollToStart();
   }
   void _scrollToPreviousMessage() {
-    if (_currentConversation == null || _currentConversation!.messages.isEmpty) return;
+    if (_currentConversation == null || _blockManager.totalBlockCount == 0) return;
     
     // 只用主视口
     if (!_itemScrollController.isAttached) return;
@@ -371,7 +380,7 @@ class _MainChatScreenState extends State<MainChatScreen> {
     if (positions.isEmpty) return;
     
     final minVisible = positions.reduce((a, b) => a.index < b.index ? a : b);
-    final targetIndex = (minVisible.index - 1).clamp(0, _currentConversation!.messages.length - 1);
+    final targetIndex = (minVisible.index - 1).clamp(0, _blockManager.lastBlockIndex);
     
     _itemScrollController.scrollTo(
       index: targetIndex,
@@ -380,6 +389,28 @@ class _MainChatScreenState extends State<MainChatScreen> {
       alignment: 0.0,
     );
   }
+
+  void _scrollToNextMessage() {
+    if (_currentConversation == null || _blockManager.totalBlockCount == 0) return;
+    
+    // 只用主视口
+    if (!_itemScrollController.isAttached) return;
+    
+    final positions = _itemPositionsListener.itemPositions.value;
+    if (positions.isEmpty) return;
+    
+    // 找到顶部的块，跳到下一个
+    final minVisible = positions.reduce((a, b) => a.index < b.index ? a : b);
+    final targetIndex = (minVisible.index + 1).clamp(0, _blockManager.lastBlockIndex);
+    
+    _itemScrollController.scrollTo(
+      index: targetIndex,
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeOut,
+      alignment: 0.0,
+    );
+  }
+
 
   void _scrollToNextMessage() {
     if (_currentConversation == null || _currentConversation!.messages.isEmpty) return;
@@ -401,7 +432,7 @@ class _MainChatScreenState extends State<MainChatScreen> {
       alignment: 0.0,
     );
   }
-  // 构建消息列表（复用代码）
+  // 构建块列表（复用代码）
 
   Widget _buildMessageList({
     required ItemScrollController controller,
@@ -416,25 +447,67 @@ class _MainChatScreenState extends State<MainChatScreen> {
       itemPositionsListener: positionsListener,
       scrollOffsetController: offsetController,
       padding: const EdgeInsets.symmetric(vertical: 16),
-      itemCount: _currentConversation!.messages.length,
-      itemBuilder: (context, index) {
-        final message = _currentConversation!.messages[index];
+      itemCount: _blockManager.totalBlockCount,
+      itemBuilder: (context, blockIndex) {
+        final located = _blockManager.locateBlock(blockIndex);
+        if (located == null) return const SizedBox();
         
-        if (message.id == _streamingMessageId) {
-          return ValueListenableBuilder<String>(
-            valueListenable: _streamingContent,
-            builder: (context, content, _) {
-              final streamingMsg = Message(
-                id: message.id,
-                role: MessageRole.assistant,
-                content: content,
-                timestamp: message.timestamp,
-                status: MessageStatus.sending,
+        final (message, localIndex) = located;
+        final isFirst = _blockManager.isFirstBlock(blockIndex);
+        final isLast = _blockManager.isLastBlock(blockIndex);
+        final isStreaming = _blockManager.isStreaming(message.id);
+        
+        // 获取块内容
+        String content;
+        if (isStreaming) {
+          content = _blockManager.getStreamingBlockContent(message.id, localIndex);
+        } else {
+          content = _blockManager.getBlockContent(blockIndex);
+        }
+        
+        // 流式时使用 ValueListenableBuilder 监听块数变化
+        if (isStreaming && isLast) {
+          return ValueListenableBuilder<int>(
+            valueListenable: _streamingBlockCount,
+            builder: (context, _, __) {
+              final streamContent = _blockManager.getStreamingBlockContent(message.id, localIndex);
+              return BlockWidget(
+                message: message,
+                content: streamContent,
+                localIndex: localIndex,
+                isFirst: isFirst,
+                isLast: isLast,
+                isStreaming: true,
               );
-              return MessageBubble(message: streamingMsg);
             },
           );
         }
+        
+        // 找到消息在列表中的索引（用于操作回调）
+        final messageIndex = _currentConversation!.messages.indexWhere((m) => m.id == message.id);
+        
+        return BlockWidget(
+          message: message,
+          content: content,
+          localIndex: localIndex,
+          isFirst: isFirst,
+          isLast: isLast,
+          isStreaming: isStreaming,
+          onRetry: isLast && message.status == MessageStatus.error 
+              ? () => _sendMessage(message.content, message.attachments) 
+              : null,
+          onDelete: isLast ? () => _deleteMessage(messageIndex) : null,
+          onRegenerate: isLast && message.role == MessageRole.assistant && message.status == MessageStatus.sent 
+              ? () => _regenerateMessage(messageIndex) 
+              : null,
+          onEdit: isLast && message.role == MessageRole.user && message.status == MessageStatus.sent 
+              ? () => _editMessage(messageIndex) 
+              : null,
+        );
+      },
+    );
+  }
+
         
         return MessageBubble(
           message: message,
@@ -446,20 +519,17 @@ class _MainChatScreenState extends State<MainChatScreen> {
       },
     );
   }
-
-
-
-
-
   Future<void> _deleteMessage(int index) async {
-    if (_currentConversation == null) return;
+    if (_currentConversation == null || index < 0) return;
     _currentConversation!.messages.removeAt(index);
     await ConversationService.instance.update(_currentConversation!);
+    _updateBlockManager();
     setState(() {});
   }
 
 
   Future<void> _editMessage(int index) async {
+
     if (_currentConversation == null) return;
     final message = _currentConversation!.messages[index];
     if (message.role != MessageRole.user) return;
@@ -484,8 +554,6 @@ class _MainChatScreenState extends State<MainChatScreen> {
         while (_currentConversation!.messages.length > index) {
           _currentConversation!.messages.removeLast();
         }
-
-        
         // 添加编辑后的消息
         final editedMessage = Message(
           role: MessageRole.user,
@@ -495,8 +563,10 @@ class _MainChatScreenState extends State<MainChatScreen> {
           embeddedFiles: newEmbeddedFiles,
           status: MessageStatus.sent,
         );
+        editedMessage.initBlocks();
         _currentConversation!.messages.add(editedMessage);
         await ConversationService.instance.update(_currentConversation!);
+        _updateBlockManager();
         setState(() {});
         _scrollToBottom();
         await _sendMessageToAI();
@@ -504,7 +574,7 @@ class _MainChatScreenState extends State<MainChatScreen> {
         // 仅保存，不重发，不删除后续消息
         final msgIndex = _currentConversation!.messages.indexWhere((m) => m.id == message.id);
         if (msgIndex != -1) {
-          _currentConversation!.messages[msgIndex] = Message(
+          final updatedMessage = Message(
             id: message.id,
             role: MessageRole.user,
             content: newContent,
@@ -514,7 +584,10 @@ class _MainChatScreenState extends State<MainChatScreen> {
             embeddedFiles: newEmbeddedFiles,
             status: MessageStatus.sent,
           );
+          updatedMessage.initBlocks();
+          _currentConversation!.messages[msgIndex] = updatedMessage;
           await ConversationService.instance.update(_currentConversation!);
+          _updateBlockManager();
           setState(() {});
         }
       }
@@ -523,15 +596,18 @@ class _MainChatScreenState extends State<MainChatScreen> {
 
 
   Future<void> _regenerateMessage(int aiMessageIndex) async {
-    if (_currentConversation == null) return;
+
+    if (_currentConversation == null || aiMessageIndex < 0) return;
     _currentConversation!.messages.removeAt(aiMessageIndex);
     await ConversationService.instance.update(_currentConversation!);
+    _updateBlockManager();
     setState(() {});
     await _sendMessageToAI();
   }
 
 
   Future<void> _sendAllFiles() async {
+
 
     if (_currentConversation == null) return;
     
@@ -584,17 +660,18 @@ class _MainChatScreenState extends State<MainChatScreen> {
       fullContent += '\n\n【已超过900K】';
     }
     final userMessage = Message(role: MessageRole.user, content: displayContent, fullContent: fullContent, embeddedFiles: embeddedFiles, status: MessageStatus.sent);
-
-
+    userMessage.initBlocks();
 
     _currentConversation!.messages.add(userMessage);
     await ConversationService.instance.update(_currentConversation!);
+    _updateBlockManager();
     setState(() {});
     _scrollToBottom();
     await _sendMessageToAI();
   }
 
   Future<List<String>?> _showFileSelectionDialog(List<String> rootDirs, List<Map<String, dynamic>> allFiles) async {
+
     // 构建树形结构
     final tree = _FileTreeNode(name: '', path: '', isDirectory: true);
     
@@ -859,42 +936,46 @@ class _MainChatScreenState extends State<MainChatScreen> {
       ),
     );
   }
-
-
-
   Future<void> _sendMessage(String text, List<FileAttachment> attachments) async {
     if (text.isEmpty && attachments.isEmpty) return;
     if (_currentConversation == null) return;
     final userMessage = Message(role: MessageRole.user, content: text, attachments: attachments, status: MessageStatus.sent);
+    userMessage.initBlocks();
     _currentConversation!.messages.add(userMessage);
     await ConversationService.instance.update(_currentConversation!);
+    _updateBlockManager();
     setState(() {});
     _scrollToBottom();
     await _sendMessageToAI();
   }
-
   void _stopGeneration() {
     _stopRequested = true;
     ApiService.cancelRequest();
-    _streamingMessageId = null;
     setState(() => _isLoading = false);
     
     // 更新最后一条消息状态
     if (_currentConversation != null && _currentConversation!.messages.isNotEmpty) {
       final lastMsg = _currentConversation!.messages.last;
       if (lastMsg.role == MessageRole.assistant && lastMsg.status == MessageStatus.sending) {
-        final content = _streamingContent.value;
+        // 获取已生成的内容
+        final blocks = _blockManager.finishStreaming(lastMsg.id);
+        final content = blocks.map((b) => b.content).join();
+        
+        _streamingMessageId = null;
+        
         final msgIndex = _currentConversation!.messages.indexWhere((m) => m.id == lastMsg.id);
         if (msgIndex != -1) {
           if (content.isNotEmpty) {
             // 有内容，更新为已停止
-            _currentConversation!.messages[msgIndex] = Message(
+            final stoppedMessage = Message(
               id: lastMsg.id,
               role: MessageRole.assistant,
               content: '$content\n\n[已停止生成]',
               timestamp: lastMsg.timestamp,
               status: MessageStatus.sent,
             );
+            stoppedMessage.initBlocks();
+            _currentConversation!.messages[msgIndex] = stoppedMessage;
             ConversationService.instance.update(_currentConversation!);
           } else {
             // 没有内容，直接删除这条消息
@@ -904,18 +985,21 @@ class _MainChatScreenState extends State<MainChatScreen> {
         }
       }
     }
+    _updateBlockManager();
     setState(() {});
   }
-
   Future<void> _sendMessageToAI() async {
-
-
     if (_currentConversation == null) return;
     _stopRequested = false;
     final aiMessage = Message(role: MessageRole.assistant, content: '', status: MessageStatus.sending);
     _currentConversation!.messages.add(aiMessage);
     _streamingMessageId = aiMessage.id;
-    _streamingContent.value = '';
+    
+    // 开始流式分块
+    _blockManager.startStreaming(aiMessage.id);
+    _updateBlockManager();
+    _streamingBlockCount.value = 0;
+    
     setState(() => _isLoading = true);
     _scrollToBottom();
     final stopwatch = Stopwatch()..start();
@@ -928,23 +1012,29 @@ class _MainChatScreenState extends State<MainChatScreen> {
         directoryTree: _directoryTree,
         onChunk: (chunk) {
           fullContent += chunk;
+          
+          // 追加到块管理器
+          _blockManager.appendStreamingContent(aiMessage.id, chunk);
+          
           final now = DateTime.now();
           if (now.difference(_lastUIUpdate) >= _uiUpdateInterval) {
             _lastUIUpdate = now;
-            // 使用 ValueNotifier 局部更新，不触发整个列表重建
-            _streamingContent.value = fullContent;
-            // reverse 列表不需要手动滚动，新内容自动出现在底部
+            // 更新块数，触发 UI 刷新
+            _streamingBlockCount.value = _blockManager.getStreamingBlockCount(aiMessage.id);
           }
         },
       );
 
       
       stopwatch.stop();
+      
+      // 完成流式，获取分好的块
+      final blocks = _blockManager.finishStreaming(aiMessage.id);
       _streamingMessageId = null;
       
       final msgIndex = _currentConversation!.messages.indexWhere((m) => m.id == aiMessage.id);
       if (msgIndex != -1) {
-        _currentConversation!.messages[msgIndex] = Message(
+        final newMessage = Message(
           id: aiMessage.id,
           role: MessageRole.assistant,
           content: result.content,
@@ -957,32 +1047,40 @@ class _MainChatScreenState extends State<MainChatScreen> {
             duration: stopwatch.elapsedMilliseconds / 1000,
             isRealUsage: result.isRealUsage,
           ),
-
         );
+        newMessage.blocks = blocks;
+        _currentConversation!.messages[msgIndex] = newMessage;
       }
       await ConversationService.instance.update(_currentConversation!);
+      _updateBlockManager();
 
       setState(() {});
-      // reverse 列表完成后自动在底部，无需额外滚动
       await _checkAndNavigateToSub(result.content);
 
     } catch (e) {
       // 如果是主动停止，不显示错误
       if (_stopRequested) {
+        _blockManager.finishStreaming(aiMessage.id);
         _streamingMessageId = null;
+        _updateBlockManager();
         setState(() {});
         return;
       }
       
+      _blockManager.finishStreaming(aiMessage.id);
       _streamingMessageId = null;
       final msgIndex = _currentConversation!.messages.indexWhere((m) => m.id == aiMessage.id);
       if (msgIndex != -1) {
-        _currentConversation!.messages[msgIndex] = Message(id: aiMessage.id, role: MessageRole.assistant, content: '发送失败: $e', timestamp: aiMessage.timestamp, status: MessageStatus.error);
+        final errorMessage = Message(id: aiMessage.id, role: MessageRole.assistant, content: '发送失败: $e', timestamp: aiMessage.timestamp, status: MessageStatus.error);
+        errorMessage.initBlocks();
+        _currentConversation!.messages[msgIndex] = errorMessage;
       }
       await ConversationService.instance.update(_currentConversation!);
+      _updateBlockManager();
       setState(() {});
       
       // 显示错误弹窗，方便手机调试
+
       if (mounted) {
         final detailedError = ApiService.lastError ?? e.toString();
         showDialog(
@@ -1127,12 +1225,12 @@ class _MainChatScreenState extends State<MainChatScreen> {
       ],
     ));
   }
-
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
-    final hasMessages = _currentConversation != null && _currentConversation!.messages.isNotEmpty;
+    final hasBlocks = _currentConversation != null && _blockManager.totalBlockCount > 0;
     return Scaffold(
+
       key: _scaffoldKey,
       appBar: AppBar(
         leading: IconButton(icon: const Icon(Icons.menu), onPressed: () => _scaffoldKey.currentState?.openDrawer()),
@@ -1166,7 +1264,7 @@ class _MainChatScreenState extends State<MainChatScreen> {
           Column(
             children: [
               Expanded(
-                child: !hasMessages
+                child: !hasBlocks
                     ? Center(
                         child: Column(
                           mainAxisAlignment: MainAxisAlignment.center,
@@ -1179,6 +1277,7 @@ class _MainChatScreenState extends State<MainChatScreen> {
                       )
                     : Opacity(
                         opacity: _isListReady ? 1.0 : 0.0,
+
                         child: NotificationListener<ScrollNotification>(
                           onNotification: _handleScrollNotification,
                           child: Stack(
@@ -1219,11 +1318,12 @@ class _MainChatScreenState extends State<MainChatScreen> {
 
             ],
           ),
-          if (_showScrollButtons && hasMessages)
+          if (_showScrollButtons && hasBlocks)
             Positioned(
               right: 12,
               top: 0,
               bottom: 80,
+
               child: Center(
                 child: ScrollButtons(
                   onScrollToTop: _scrollToTop,
