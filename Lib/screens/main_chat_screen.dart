@@ -94,14 +94,20 @@ class _MainChatScreenState extends State<MainChatScreen> {
     final positions = _itemPositionsListener.itemPositions.value;
     if (positions.isEmpty || _currentConversation == null) return;
     
+    // 没有块时不处理
+    if (!_blockManager.hasBlocks) return;
+    
     // 使用块索引判断是否在底部
     final maxIndex = _blockManager.lastBlockIndex;
+    if (maxIndex < 0) return;  // 额外安全检查
+    
     final isBottomVisible = positions.any((pos) => pos.index == maxIndex);
     
     if (isBottomVisible != _isNearBottom) {
       setState(() => _isNearBottom = isBottomVisible);
     }
   }
+
   
   /// 更新块管理器
   void _updateBlockManager() {
