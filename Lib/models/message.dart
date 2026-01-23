@@ -73,6 +73,7 @@ class EmbeddedFile {
     size: json['size'] ?? 0,
   );
 }
+import 'content_block.dart';
 
 class Message {
   final String id;
@@ -84,6 +85,13 @@ class Message {
   final List<EmbeddedFile> embeddedFiles;  // 内嵌文件
   MessageStatus status;
   TokenUsage? tokenUsage;
+  
+  // 分块相关
+  int blockStartIndex = 0;  // 这条消息的第一个块在全局的位置
+  List<ContentBlock> blocks = [];  // 这条消息的所有块
+  
+  int get blockCount => blocks.isEmpty ? 1 : blocks.length;
+  int get blockEndIndex => blockStartIndex + blockCount - 1;
 
   Message({
     String? id,
@@ -99,6 +107,14 @@ class Message {
         timestamp = timestamp ?? DateTime.now(),
         attachments = attachments ?? [],
         embeddedFiles = embeddedFiles ?? [];
+  
+  /// 初始化块（非流式消息调用）
+  void initBlocks() {
+    if (content.isNotEmpty && blocks.isEmpty) {
+      blocks = StreamingBlockBuilder.fromContent(id, content);
+    }
+  }
+
 
   // 获取发送给API的内容
   String get apiContent => fullContent ?? content;
