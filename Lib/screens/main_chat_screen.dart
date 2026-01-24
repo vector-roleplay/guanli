@@ -974,11 +974,9 @@ class _MainChatScreenState extends State<MainChatScreen> {
     if (_currentConversation != null && _currentConversation!.messages.isNotEmpty) {
       final lastMsg = _currentConversation!.messages.last;
       if (lastMsg.role == MessageRole.assistant && lastMsg.status == MessageStatus.sending) {
-        // 获取已生成的内容
-        final blocks = _blockManager.finishStreaming(lastMsg.id);
+        // 【修复】先获取块数据，不移除 builder
+        final blocks = _blockManager.finalizeStreamingBlocks(lastMsg.id);
         final content = blocks.map((b) => b.content).join();
-        
-        _streamingMessageId = null;
         
         final msgIndex = _currentConversation!.messages.indexWhere((m) => m.id == lastMsg.id);
         if (msgIndex != -1) {
@@ -993,18 +991,25 @@ class _MainChatScreenState extends State<MainChatScreen> {
             );
             stoppedMessage.initBlocks();
             _currentConversation!.messages[msgIndex] = stoppedMessage;
-            ConversationService.instance.update(_currentConversation!);
           } else {
             // 没有内容，直接删除这条消息
             _currentConversation!.messages.removeAt(msgIndex);
-            ConversationService.instance.update(_currentConversation!);
           }
+          
+          // 【修复】先更新 BlockManager
+          _updateBlockManager();
+          
+          // 【修复】最后才移除 builder 和清空 streamingMessageId
+          _blockManager.removeStreamingBuilder(lastMsg.id);
+          _streamingMessageId = null;
+          
+          ConversationService.instance.update(_currentConversation!);
         }
       }
     }
-    _updateBlockManager();
     setState(() {});
   }
+
   Future<void> _sendMessageToAI() async {
     if (_currentConversation == null) return;
     _stopRequested = false;
@@ -1041,13 +1046,10 @@ class _MainChatScreenState extends State<MainChatScreen> {
           }
         },
       );
-
-      
       stopwatch.stop();
       
-      // 完成流式，获取分好的块
-      final blocks = _blockManager.finishStreaming(aiMessage.id);
-      _streamingMessageId = null;
+      // 【修复】步骤1：先获取块数据，但不移除 builder
+      final blocks = _blockManager.finalizeStreamingBlocks(aiMessage.id);
       
       final msgIndex = _currentConversation!.messages.indexWhere((m) => m.id == aiMessage.id);
       if (msgIndex != -1) {
@@ -1065,14 +1067,23 @@ class _MainChatScreenState extends State<MainChatScreen> {
             isRealUsage: result.isRealUsage,
           ),
         );
+        // 【修复】步骤2：先赋值 blocks
         newMessage.blocks = blocks;
         _currentConversation!.messages[msgIndex] = newMessage;
+        
+        // 【修复】步骤3：更新 BlockManager（此时 msg.blocks 已有数据）
+        _updateBlockManager();
+        
+        // 【修复】步骤4：最后才移除 builder 和清空 streamingMessageId
+        _blockManager.removeStreamingBuilder(aiMessage.id);
+        _streamingMessageId = null;
       }
+      
       await ConversationService.instance.update(_currentConversation!);
-      _updateBlockManager();
 
       setState(() {});
       await _checkAndNavigateToSub(result.content);
+
 
     } catch (e) {
       // 如果是主动停止，不显示错误
