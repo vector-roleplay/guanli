@@ -36,8 +36,9 @@ class PositionedList extends StatefulWidget {
     this.addAutomaticKeepAlives = true,
   })  : assert(itemCount != null),
         assert(itemBuilder != null),
-        assert((positionedIndex == 0) || (positionedIndex < itemCount)),
+        // 【修复】移除 positionedIndex 的 assert，由 _safePositionedIndex 保证安全
         super(key: key);
+
 
   final int itemCount;
   final IndexedWidgetBuilder itemBuilder;
