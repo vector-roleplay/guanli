@@ -105,10 +105,15 @@ class ItemScrollController {
   bool get isAttached => _scrollableListState != null;
 
   _ScrollablePositionedListState? _scrollableListState;
-
   void jumpTo({required int index, double alignment = 0}) {
-    _scrollableListState!._jumpTo(index: index, alignment: alignment);
+    if (_scrollableListState == null) return;
+    // 【修复】添加安全检查
+    final itemCount = _scrollableListState!.widget.itemCount;
+    if (itemCount == 0) return;
+    final safeIndex = index.clamp(0, itemCount - 1);
+    _scrollableListState!._jumpTo(index: safeIndex, alignment: alignment);
   }
+
 
   Future<void> scrollTo({
     required int index,
@@ -379,11 +384,13 @@ class _ScrollablePositionedListState extends State<ScrollablePositionedList>
             _screenScrollCount,
         widget.minCacheExtent ?? 0,
       );
-
   void _jumpTo({required int index, required double alignment}) {
     _stopScroll(canceled: true);
-    if (index > widget.itemCount - 1) {
-      index = widget.itemCount - 1;
+    // 【修复】添加更完善的边界检查
+    if (widget.itemCount == 0) {
+      index = 0;
+    } else {
+      index = index.clamp(0, widget.itemCount - 1);
     }
     setState(() {
       primary.scrollController.jumpTo(0);
@@ -391,6 +398,7 @@ class _ScrollablePositionedListState extends State<ScrollablePositionedList>
       primary.alignment = alignment;
     });
   }
+
 
   Future<void> _scrollTo({
     required int index,
