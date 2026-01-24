@@ -129,8 +129,6 @@ class BlockManager {
   
   /// 是否有块
   bool get hasBlocks => totalBlockCount > 0;
-
-  
   // ========== 流式支持 ==========
   
   /// 开始流式消息
@@ -148,7 +146,24 @@ class BlockManager {
     return _streamingBuilders[messageId]?.blockCount ?? 1;
   }
   
-  /// 完成流式消息
+  /// 【新方法】只获取块数据，不移除 builder
+  /// 这样 totalBlockCount 仍然可以从 builder 获取正确的块数
+  List<ContentBlock> finalizeStreamingBlocks(String messageId) {
+    final builder = _streamingBuilders[messageId];
+    if (builder != null) {
+      return builder.finalize();
+    }
+    return [];
+  }
+  
+  /// 【新方法】移除流式构建器
+  /// 应该在 msg.blocks 赋值之后调用
+  void removeStreamingBuilder(String messageId) {
+    _streamingBuilders.remove(messageId);
+  }
+  
+  /// 【保留旧方法，但标记为废弃】
+  @Deprecated('使用 finalizeStreamingBlocks + removeStreamingBuilder 代替')
   List<ContentBlock> finishStreaming(String messageId) {
     final builder = _streamingBuilders.remove(messageId);
     if (builder != null) {
