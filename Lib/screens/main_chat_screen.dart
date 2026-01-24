@@ -1083,19 +1083,21 @@ class _MainChatScreenState extends State<MainChatScreen> {
 
       setState(() {});
       await _checkAndNavigateToSub(result.content);
-
-
     } catch (e) {
       // 如果是主动停止，不显示错误
       if (_stopRequested) {
-        _blockManager.finishStreaming(aiMessage.id);
+        // 【修复】使用新方法
+        _blockManager.finalizeStreamingBlocks(aiMessage.id);
+        _blockManager.removeStreamingBuilder(aiMessage.id);
         _streamingMessageId = null;
         _updateBlockManager();
         setState(() {});
         return;
       }
       
-      _blockManager.finishStreaming(aiMessage.id);
+      // 【修复】使用新方法
+      _blockManager.finalizeStreamingBlocks(aiMessage.id);
+      _blockManager.removeStreamingBuilder(aiMessage.id);
       _streamingMessageId = null;
       final msgIndex = _currentConversation!.messages.indexWhere((m) => m.id == aiMessage.id);
       if (msgIndex != -1) {
@@ -1106,6 +1108,7 @@ class _MainChatScreenState extends State<MainChatScreen> {
       await ConversationService.instance.update(_currentConversation!);
       _updateBlockManager();
       setState(() {});
+
       
       // 显示错误弹窗，方便手机调试
 
